@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Audio Amplifiers Configuration
+#
+
+menu "Audio Amplifiers"
+
+source "drivers/amplifiers/tas256x/Kconfig"
+source "drivers/amplifiers/tas25xx/Kconfig"
+source "drivers/amplifiers/cs35l41/Kconfig"
+source "drivers/amplifiers/cs35l45/Kconfig"
+source "drivers/amplifiers/cs40l25/Kconfig"
+source "drivers/amplifiers/cs40l26/Kconfig"
+source "drivers/amplifiers/drv2624/Kconfig"
+source "drivers/amplifiers/audiometrics/Kconfig"
+
+# WM_ADSP support (used by multiple amplifiers)
+config SND_SOC_WM_ADSP
+	tristate "Wolfson WM_ADSP support"
+	help
+	  This driver provides support for Wolfson WM_ADSP (Audio DSP)
+	  functionality used by various Cirrus Logic amplifiers.
+
+endmenu

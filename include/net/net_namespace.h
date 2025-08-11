@@ -81,7 +81,6 @@ struct net {
 						 * or to unregister pernet ops
 						 * (pernet_ops_rwsem write locked).
 						 */
-	struct llist_node	defer_free_list;
 	struct llist_node	cleanup_list;	/* namespaces on death row */
 
 #ifdef CONFIG_KEYS
@@ -188,6 +187,36 @@ struct net {
 	struct netns_smc	smc;
 #endif
 } __randomize_layout;
+
+/*
+ * To work around a KMI issue, hooks_bridge[] could not be
+ * added to struct netns_nf. Since the only use of netns_nf
+ * is embedded in struct net, struct ext_net is added to
+ * contain struct net plus the new field. Users of the new
+ * field must use get_nf_hooks_bridge() to access the field.
+ */
+struct ext_net {
+	struct net net;
+#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
+	struct nf_hook_entries __rcu *hooks_bridge[NF_INET_NUMHOOKS];
+#endif
+	ANDROID_VENDOR_DATA(1);
+};
+
+#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
+extern struct net init_net;
+extern struct nf_hook_entries **init_nf_hooks_bridgep;
+
+static inline struct nf_hook_entries __rcu **get_nf_hooks_bridge(const struct net *net)
+{
+	struct ext_net *ext_net;
+
+	if (net == &init_net)
+		return init_nf_hooks_bridgep;
+	ext_net = container_of(net, struct ext_net, net);
+	return ext_net->hooks_bridge;
+}
+#endif
 
 #include <linux/seq_file_net.h>
 

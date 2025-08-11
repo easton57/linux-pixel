@@ -170,8 +170,7 @@ extern struct list_head cgroup_roots;
 
 /* iterate across the hierarchies */
 #define for_each_root(root)						\
-	list_for_each_entry_rcu((root), &cgroup_roots, root_list,	\
-				lockdep_is_held(&cgroup_mutex))
+	list_for_each_entry((root), &cgroup_roots, root_list)
 
 /**
  * for_each_subsys - iterate all enabled cgroup subsystems
@@ -252,7 +251,8 @@ int cgroup_attach_task(struct cgroup *dst_cgrp, struct task_struct *leader,
 void cgroup_attach_lock(bool lock_threadgroup);
 void cgroup_attach_unlock(bool lock_threadgroup);
 struct task_struct *cgroup_procs_write_start(char *buf, bool threadgroup,
-					     bool *locked)
+					     bool *locked,
+					     struct cgroup *dst_cgrp);
 	__acquires(&cgroup_threadgroup_rwsem);
 void cgroup_procs_write_finish(struct task_struct *task, bool locked)
 	__releases(&cgroup_threadgroup_rwsem);

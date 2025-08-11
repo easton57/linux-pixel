@@ -1,1 +1,0 @@
-cmd_fs/erofs/built-in.a := rm -f fs/erofs/built-in.a;  printf "fs/erofs/%s " super.o inode.o data.o namei.o dir.o utils.o pcpubuf.o sysfs.o xattr.o decompressor.o zmap.o zdata.o | xargs aarch64-linux-gnu-ar cDPrST fs/erofs/built-in.a

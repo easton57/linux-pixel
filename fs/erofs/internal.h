@@ -208,6 +208,7 @@ struct erofs_workgroup {
 
 	/* overall workgroup reference count */
 	atomic_t refcount;
+        spinlock_t lock;
 };
 
 static inline bool erofs_workgroup_try_to_freeze(struct erofs_workgroup *grp,
@@ -429,6 +430,11 @@ int z_erofs_fill_inode(struct inode *inode);
 int z_erofs_map_blocks_iter(struct inode *inode,
 			    struct erofs_map_blocks *map,
 			    int flags);
+void *z_erofs_get_gbuf(unsigned int requiredpages);
+void z_erofs_put_gbuf(void *ptr);
+int z_erofs_gbuf_growsize(unsigned int nrpages);
+int __init z_erofs_gbuf_init(void);
+void z_erofs_gbuf_exit(void);
 #else
 static inline int z_erofs_fill_inode(struct inode *inode) { return -EOPNOTSUPP; }
 static inline int z_erofs_map_blocks_iter(struct inode *inode,
@@ -437,6 +443,8 @@ static inline int z_erofs_map_blocks_iter(struct inode *inode,
 {
 	return -EOPNOTSUPP;
 }
+static inline int z_erofs_gbuf_init(void) { return 0; }
+static inline void z_erofs_gbuf_exit(void) {}
 #endif	/* !CONFIG_EROFS_FS_ZIP */
 
 struct erofs_map_dev {
@@ -508,13 +516,6 @@ static inline void *erofs_vm_map_ram(struct page **pages, unsigned int count)
 	return NULL;
 }
 
-/* pcpubuf.c */
-void *erofs_get_pcpubuf(unsigned int requiredpages);
-void erofs_put_pcpubuf(void *ptr);
-int erofs_pcpubuf_growsize(unsigned int nrpages);
-void erofs_pcpubuf_init(void);
-void erofs_pcpubuf_exit(void);
-
 /* sysfs.c */
 int erofs_register_sysfs(struct super_block *sb);
 void erofs_unregister_sysfs(struct super_block *sb);
@@ -522,7 +523,11 @@ int __init erofs_init_sysfs(void);
 void erofs_exit_sysfs(void);
 
 /* utils.c / zdata.c */
-struct page *erofs_allocpage(struct page **pagepool, gfp_t gfp);
+struct page *__erofs_allocpage(struct page **pagepool, gfp_t gfp, bool tryrsv);
+static inline struct page *erofs_allocpage(struct page **pagepool, gfp_t gfp)
+{
+	return __erofs_allocpage(pagepool, gfp, false);
+}
 static inline void erofs_pagepool_add(struct page **pagepool,
 		struct page *page)
 {
@@ -546,6 +551,7 @@ int __init z_erofs_init_zip_subsystem(void);
 void z_erofs_exit_zip_subsystem(void);
 int erofs_try_to_free_all_cached_pages(struct erofs_sb_info *sbi,
 				       struct erofs_workgroup *egrp);
+int erofs_init_managed_cache(struct super_block *sb);
 int erofs_try_to_free_cached_page(struct page *page);
 int z_erofs_parse_cfgs(struct super_block *sb, struct erofs_super_block *dsb);
 #else
@@ -555,6 +561,7 @@ static inline int erofs_init_shrinker(void) { return 0; }
 static inline void erofs_exit_shrinker(void) {}
 static inline int z_erofs_init_zip_subsystem(void) { return 0; }
 static inline void z_erofs_exit_zip_subsystem(void) {}
+static inline int erofs_init_managed_cache(struct super_block *sb) { return 0; }
 #endif	/* !CONFIG_EROFS_FS_ZIP */
 
 #ifdef CONFIG_EROFS_FS_ZIP_LZMA

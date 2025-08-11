@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Display Drivers Configuration
+#
+
+menu "Display Drivers"
+
+source "drivers/display/samsung/Kconfig"
+source "drivers/display/common/Kconfig"
+
+endmenu 
+

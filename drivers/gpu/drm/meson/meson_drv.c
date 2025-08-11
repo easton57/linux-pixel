@@ -276,7 +276,7 @@ static int meson_drv_bind_master(struct device *dev, bool has_components)
 	 * Remove early framebuffers (ie. simplefb). The framebuffer can be
 	 * located anywhere in RAM
 	 */
-	ret = drm_aperture_remove_framebuffers(&meson_driver);
+	ret = drm_aperture_remove_framebuffers(false, &meson_driver);
 	if (ret)
 		goto free_canvas_vd1_2;
 

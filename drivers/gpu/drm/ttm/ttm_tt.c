@@ -37,7 +37,9 @@
 #include <linux/file.h>
 #include <linux/module.h>
 #include <drm/drm_cache.h>
+#ifndef __GENKSYMS__
 #include <drm/drm_device.h>
+#endif
 #include <drm/ttm/ttm_bo_driver.h>
 
 #include "ttm_module.h"
@@ -382,6 +384,7 @@ void ttm_tt_unpopulate(struct ttm_device *bdev, struct ttm_tt *ttm)
 
 	ttm->page_flags &= ~TTM_TT_FLAG_PRIV_POPULATED;
 }
+EXPORT_SYMBOL_GPL(ttm_tt_unpopulate);
 
 #ifdef CONFIG_DEBUG_FS
 

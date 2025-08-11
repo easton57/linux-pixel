@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0
+# Exynos GS pin control drivers
+
+obj-$(CONFIG_PINCTRL_EXYNOS_GS)	+= pinctrl-exynos-gs.o
+pinctrl-exynos-gs-y		+= pinctrl-samsung.o pinctrl-exynos.o pinctrl-exynos-arm64.o
+pinctrl-exynos-gs-y		+= pinctrl-gs.o
+pinctrl-exynos-gs-y		+= pinctrl-gs201.o

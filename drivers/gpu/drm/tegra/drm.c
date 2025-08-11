@@ -1262,7 +1262,7 @@ static int host1x_drm_probe(struct host1x_device *dev)
 	 * will not expose any modesetting features.
 	 */
 	if (drm->mode_config.num_crtc > 0) {
-		err = drm_aperture_remove_framebuffers(&tegra_drm_driver);
+		err = drm_aperture_remove_framebuffers(false, &tegra_drm_driver);
 		if (err < 0)
 			goto hub;
 	} else {

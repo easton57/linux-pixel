@@ -1,1 +1,0 @@
-cmd_lib/kunit/built-in.a := rm -f lib/kunit/built-in.a;  printf "lib/kunit/%s " test.o resource.o string-stream.o assert.o try-catch.o executor.o debugfs.o | xargs aarch64-linux-gnu-ar cDPrST lib/kunit/built-in.a

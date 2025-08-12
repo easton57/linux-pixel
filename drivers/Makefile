@@ -9,10 +9,10 @@
 obj-y				+= irqchip/
 obj-y				+= bus/
 
-obj-$(CONFIG_GENERIC_PHY)	+= phy/
+obj-$(CONFIG_GENERIC_PHY)	+= phy/  # TODO: Ensure defconfig includes this
 
 # GPIO must come after pinctrl as gpios may need to mux pins etc
-obj-$(CONFIG_PINCTRL)		+= pinctrl/
+obj-$(CONFIG_PINCTRL)		+= pinctrl/  # TODO: Ensure defconfig includes this
 obj-$(CONFIG_GPIOLIB)		+= gpio/
 obj-y				+= pwm/
 
@@ -46,7 +46,7 @@ obj-$(CONFIG_VDPA)		+= vdpa/
 obj-$(CONFIG_XEN)		+= xen/
 
 # regulators early, since some subsystems rely on them to initialize
-obj-$(CONFIG_REGULATOR)		+= regulator/
+obj-$(CONFIG_REGULATOR)		+= regulator/  # TODO: Ensure defconfig includes this
 
 # reset controllers early, since gpu drivers might rely on them to initialize
 obj-$(CONFIG_RESET_CONTROLLER)	+= reset/
@@ -72,7 +72,7 @@ obj-$(CONFIG_PARPORT)		+= parport/
 obj-y				+= base/ block/ misc/ mfd/ nfc/
 obj-$(CONFIG_LIBNVDIMM)		+= nvdimm/
 obj-$(CONFIG_DAX)		+= dax/
-obj-$(CONFIG_DMA_SHARED_BUFFER) += dma-buf/
+obj-$(CONFIG_DMA_SHARED_BUFFER) += dma-buf/  # TODO: Ensure defconfig includes this
 obj-$(CONFIG_NUBUS)		+= nubus/
 obj-y				+= cxl/
 obj-y				+= macintosh/
@@ -81,8 +81,8 @@ obj-y				+= nvme/
 obj-$(CONFIG_ATA)		+= ata/
 obj-$(CONFIG_TARGET_CORE)	+= target/
 obj-$(CONFIG_MTD)		+= mtd/
-obj-$(CONFIG_SPI)		+= spi/
-obj-$(CONFIG_SPMI)		+= spmi/
+obj-$(CONFIG_SPI)		+= spi/  # TODO: Ensure defconfig includes this
+obj-$(CONFIG_SPMI)		+= spmi/  # TODO: Ensure defconfig includes this
 obj-$(CONFIG_HSI)		+= hsi/
 obj-$(CONFIG_SLIMBUS)		+= slimbus/
 obj-y				+= net/
@@ -100,24 +100,24 @@ obj-$(CONFIG_ZORRO)		+= zorro/
 obj-$(CONFIG_ATA_OVER_ETH)	+= block/aoe/
 obj-$(CONFIG_PARIDE) 		+= block/paride/
 obj-$(CONFIG_TC)		+= tc/
-obj-$(CONFIG_USB_PHY)		+= usb/
-obj-$(CONFIG_USB)		+= usb/
-obj-$(CONFIG_USB_SUPPORT)	+= usb/
-obj-$(CONFIG_PCI)		+= usb/
+obj-$(CONFIG_USB_PHY)		+= usb/  # TODO: Ensure defconfig includes this
+obj-$(CONFIG_USB)		+= usb/  # TODO: Ensure defconfig includes this
+obj-$(CONFIG_USB_SUPPORT)	+= usb/  # TODO: Ensure defconfig includes this
+obj-$(CONFIG_PCI)		+= usb/  # TODO: Ensure defconfig includes this
 obj-$(CONFIG_USB_GADGET)	+= usb/
 obj-$(CONFIG_OF)		+= usb/
 obj-$(CONFIG_SERIO)		+= input/serio/
 obj-$(CONFIG_GAMEPORT)		+= input/gameport/
-obj-$(CONFIG_INPUT)		+= input/
-obj-$(CONFIG_RTC_LIB)		+= rtc/
+obj-$(CONFIG_INPUT)		+= input/  # TODO: Ensure defconfig includes this
+obj-$(CONFIG_RTC_LIB)		+= rtc/  # TODO: Ensure defconfig includes this
 obj-y				+= i2c/ i3c/ media/
 obj-$(CONFIG_PPS)		+= pps/
 obj-y				+= ptp/
 obj-$(CONFIG_W1)		+= w1/
 obj-y				+= power/
 obj-$(CONFIG_HWMON)		+= hwmon/
-obj-$(CONFIG_THERMAL)		+= thermal/
-obj-$(CONFIG_WATCHDOG)		+= watchdog/
+obj-$(CONFIG_THERMAL)		+= thermal/  # TODO: Ensure defconfig includes this
+obj-$(CONFIG_WATCHDOG)		+= watchdog/  # TODO: Ensure defconfig includes this
 obj-$(CONFIG_MD)		+= md/
 obj-$(CONFIG_BT)		+= bluetooth/
 obj-$(CONFIG_ACCESSIBILITY)	+= accessibility/
@@ -125,7 +125,7 @@ obj-$(CONFIG_ISDN)		+= isdn/
 obj-$(CONFIG_EDAC)		+= edac/
 obj-$(CONFIG_EISA)		+= eisa/
 obj-$(CONFIG_PM_OPP)		+= opp/
-obj-$(CONFIG_CPU_FREQ)		+= cpufreq/
+obj-$(CONFIG_CPU_FREQ)		+= cpufreq/  # TODO: Ensure defconfig includes this
 obj-$(CONFIG_CPU_IDLE)		+= cpuidle/
 obj-y				+= mmc/
 obj-y				+= ufs/
@@ -135,7 +135,7 @@ obj-$(CONFIG_INFINIBAND)	+= infiniband/
 obj-y				+= firmware/
 obj-$(CONFIG_CRYPTO)		+= crypto/
 obj-$(CONFIG_SUPERH)		+= sh/
-obj-y				+= clocksource/
+obj-y				+= clocksource/  # TODO: Ensure defconfig includes this
 obj-$(CONFIG_DCA)		+= dca/
 obj-$(CONFIG_HID)		+= hid/
 obj-$(CONFIG_PPC_PS3)		+= ps3/
@@ -161,10 +161,10 @@ obj-$(CONFIG_SOUNDWIRE)		+= soundwire/
 obj-$(CONFIG_VIRT_DRIVERS)	+= virt/
 obj-$(subst m,y,$(CONFIG_HYPERV))	+= hv/
 
-obj-$(CONFIG_PM_DEVFREQ)	+= devfreq/
+obj-$(CONFIG_PM_DEVFREQ)	+= devfreq/ 
 obj-$(CONFIG_EXTCON)		+= extcon/
 obj-$(CONFIG_MEMORY)		+= memory/
-obj-$(CONFIG_IIO)		+= iio/
+obj-$(CONFIG_IIO)		+= iio/  # TODO: Ensure defconfig includes this
 obj-$(CONFIG_IPACK_BUS)		+= ipack/
 obj-$(CONFIG_NTB)		+= ntb/
 obj-$(CONFIG_POWERCAP)		+= powercap/
@@ -189,3 +189,22 @@ obj-$(CONFIG_COUNTER)		+= counter/
 obj-$(CONFIG_MOST)		+= most/
 obj-$(CONFIG_PECI)		+= peci/
 obj-$(CONFIG_HTE)		+= hte/
+
+# Pixel specific drivers
+obj-y				+= google/
+obj-y				+= bts/
+obj-y				+= performance/gs_perf_mon/
+obj-y				+= performance/lat_governors/
+
+ifeq ($(CONFIG_SOC_ZUMA),y)
+obj-y += pci/controller/dwc/
+else
+obj-y += pci/controller/dwc-whi/
+endif
+
+ifeq ($(CONFIG_SOC_ZUMA),y)
+obj-y += devfreq/google/
+else
+obj-y += devfreq-whi/google/
+endif
+

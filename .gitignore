@@ -1,1 +1,13 @@
 *.o
+*.cmd
+*.a
+*.ko
+*.mod
+*.o.d
+*.o.cmd
+*.o.d.cmd
+*.o.cmd.cmd
+*.o.cmd.cmd.cmd
+*.o.cmd.cmd.cmd.cmd
+
+.gitignore

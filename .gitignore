@@ -10,4 +10,5 @@
 *.o.cmd.cmd.cmd
 *.o.cmd.cmd.cmd.cmd
 
-.gitignore
+.config
+.config.old

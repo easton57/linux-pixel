@@ -261,4 +261,6 @@ source "drivers/nfc/Kconfig"
 
 source "drivers/trusty/Kconfig"
 
+source "drivers/bts/Kconfig"
+
 endmenu

@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0
+
+source "drivers/edgetpu/abrolhos/Kconfig"
+source "drivers/edgetpu/janeiro/Kconfig"
+source "drivers/edgetpu/rio/Kconfig"

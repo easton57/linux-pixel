@@ -191,7 +191,11 @@ obj-$(CONFIG_PECI)		+= peci/
 obj-$(CONFIG_HTE)		+= hte/
 
 # Pixel specific drivers
-obj-y				+= google/
+obj-y				+= edgetpu/
+obj-y				+= amplifiers/
+obj-y				+= aoc/
+obj-y				+= aoc_ipc/
+obj-y				+= soc/google/
 obj-y				+= bts/
 obj-y				+= performance/gs_perf_mon/
 obj-y				+= performance/lat_governors/

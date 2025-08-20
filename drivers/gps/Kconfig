@@ -1,0 +1,5 @@
+menu "GPS Drivers"
+
+source "drivers/gps/broadcom/Kconfig"
+
+endmenu

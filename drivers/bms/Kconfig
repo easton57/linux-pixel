@@ -1,3 +1,5 @@
+menu "Google, LLC. BMS drivers"
+
 menuconfig GOOGLE_BMS
 	bool "Google, LLC. Charging and Fuel Gauge support"
 	help
@@ -254,3 +256,5 @@ config HL7132
 	depends on I2C && OF
 	help
 	  Say Y to enable support for the HL7132 direct charger.
+
+endmenu

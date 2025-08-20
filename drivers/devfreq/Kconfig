@@ -153,4 +153,10 @@ config ARM_SUN8I_A33_MBUS_DEVFREQ
 
 source "drivers/devfreq/event/Kconfig"
 
+menu "Google devfreq drivers"
+
+source "drivers/devfreq/google/Kconfig"
+
+endmenu
+
 endif # PM_DEVFREQ

@@ -17,4 +17,4 @@ dmabuf_selftests-y := \
 
 obj-$(CONFIG_DMABUF_SELFTESTS)	+= dmabuf_selftests.o
 
-obj-y += hepas/
+obj-y += heaps/

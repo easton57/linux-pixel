@@ -42,3 +42,5 @@ pixel-reboot-$(CONFIG_SOC_GS201) += pixel-gs201-reboot.o
 pixel-reboot-$(CONFIG_SOC_ZUMA) += pixel-zuma-reboot.o
 
 obj-$(CONFIG_PIXEL_POWER_REBOOT) += pixel-reboot.o
+
+obj-$(CONFIG_DEBUG_REBOOT) += debug-reboot.o

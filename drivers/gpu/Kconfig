@@ -1,0 +1,5 @@
+menu "Graphics Drivers"
+
+source "drivers/gpu/exynos/Kconfig"
+
+endmenu

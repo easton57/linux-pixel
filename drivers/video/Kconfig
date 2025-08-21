@@ -13,6 +13,8 @@ config APERTURE_HELPERS
 
 if HAS_IOMEM
 
+source "drivers/gpu/exynos/Kconfig"
+
 config HAVE_FB_ATMEL
 	bool
 

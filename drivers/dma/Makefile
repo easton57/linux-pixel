@@ -88,3 +88,6 @@ obj-y += mediatek/
 obj-y += qcom/
 obj-y += ti/
 obj-y += xilinx/
+
+obj-$(CONFIG_PL330_DMA_GS) += pl330.o
+obj-$(CONFIG_SAMSUNG_DMADEV) += samsung-dma.o

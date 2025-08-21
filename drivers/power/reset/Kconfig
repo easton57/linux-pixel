@@ -309,4 +309,19 @@ config PIXEL_POWER_REBOOT
 	help
 	  Reboot driver support for Pixel devices.
 
+config DEBUG_REBOOT
+	tristate "Add support for triggering debug reboot commands"
+	help
+	  Say y here to add support for reboot commands that triggers
+	  intentional watchdog or panics. Note that it is still required
+	  to either set Y to the enable module parameter or choose
+	  CONFIG_DEBUG_REBOOT_DEFAULT_ON to enable this feature.
+
+config DEBUG_REBOOT_DEFAULT_ON
+	bool "Default enable debug reboot commands"
+	depends on DEBUG_REBOOT
+	help
+	  Say y here to default enable reboot commands to trigger
+	  intentional watchdogs or panics.
+
 endif

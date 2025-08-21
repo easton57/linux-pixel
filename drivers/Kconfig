@@ -263,4 +263,10 @@ source "drivers/trusty/Kconfig"
 
 source "drivers/bts/Kconfig"
 
+source "drivers/devfreq-whi/Kconfig"
+
+source "drivers/gpu/Kconfig"
+
+source "drivers/performance/Kconfig"
+
 endmenu

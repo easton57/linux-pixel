@@ -63,3 +63,9 @@ obj-$(CONFIG_OPEN_DICE)		+= open-dice.o
 obj-$(CONFIG_GP_PCI1XXXX)	+= mchp_pci1xxxx/
 obj-$(CONFIG_VCPU_STALL_DETECTOR)	+= vcpu_stall_detector.o
 obj-$(CONFIG_UID_SYS_STATS)	+= uid_sys_stats.o
+
+obj-$(CONFIG_GSC_TPM)		+= gsc-spi.o
+obj-$(CONFIG_S5910)		    += s5910/
+obj-$(CONFIG_SBB_MUX)		+= sbb-mux/
+obj-$(CONFIG_SUBSYSTEM_COREDUMP)	+= sscoredump/
+obj-$(CONFIG_ACCESS_RAMOOPS)	+= access_ramoops.o

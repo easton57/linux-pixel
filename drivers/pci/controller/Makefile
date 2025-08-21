@@ -42,6 +42,7 @@ obj-$(CONFIG_PCIE_MT7621) += pcie-mt7621.o
 
 # pcie-hisi.o quirks are needed even without CONFIG_PCIE_DW
 obj-y				+= dwc/
+obj-y				+= dwc-whi/
 obj-y				+= mobiveil/
 
 

@@ -344,6 +344,7 @@ config PCIE_MT7621
 	  This selects a driver for the MediaTek MT7621 PCIe Controller.
 
 source "drivers/pci/controller/dwc/Kconfig"
+source "drivers/pci/controller/dwc-whi/Kconfig"
 source "drivers/pci/controller/mobiveil/Kconfig"
 source "drivers/pci/controller/cadence/Kconfig"
 endmenu

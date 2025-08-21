@@ -168,4 +168,13 @@ config USB_DWC3_AM62
 	  The Designware Core USB3 IP is programmed to operate in
 	  in USB 2.0 mode only.
 	  Say 'Y' or 'M' here if you have one such device
+
+config USB_DWC3_EXYNOS_GS
+	tristate "GS Platform"
+	depends on (USB_DWC3 || COMPILE_TEST) && OF
+	help
+	  'USB_DWC3_EXYNOS_GS' is glue layer which can be used with
+	  Synopsys DWC3 controller on GS SoCs. Say 'Y' or 'M'
+	  if you have one such devices.
+
 endif

@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
+menu "Google devfreq-whi drivers"
+
 config ARM_MEMLAT_MON
 	tristate "ARM CPU Memory Latency monitor hardware"
 	help
@@ -39,3 +41,5 @@ config EXYNOS_ALT_DVFS
 	  calculate memory load based on activated cycle. Simpleinteractive
 	  governor decides new frequency for DVFS by comparing current load
 	  and PM QoS requests.
+
+endmenu

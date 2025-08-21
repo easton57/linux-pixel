@@ -31,3 +31,17 @@ obj-$(CONFIG_VIRTIO_IOMMU) += virtio-iommu.o
 obj-$(CONFIG_IOMMU_SVA) += iommu-sva.o io-pgfault.o
 obj-$(CONFIG_SPRD_IOMMU) += sprd-iommu.o
 obj-$(CONFIG_APPLE_DART) += apple-dart.o
+
+obj-$(CONFIG_SAMSUNG_IOMMU) += samsung_iommu.o
+samsung_iommu-objs += samsung-iommu.o samsung-iommu-fault.o
+obj-$(CONFIG_SAMSUNG_IOMMU_GROUP) += samsung-iommu-group.o
+obj-$(CONFIG_SAMSUNG_SECURE_IOVA) += samsung-secure-iova.o
+obj-$(CONFIG_IOVAD_BEST_FIT_ALGO) += iovad-best-fit-algo.o
+obj-$(CONFIG_SAMSUNG_IOMMU_V9) += samsung_iommu_v9.o
+samsung_iommu_v9-objs += samsung-iommu-v9.o samsung-iommu-fault-v9.o
+obj-$(CONFIG_EXYNOS_PCIE_IOMMU) += exynos-pcie-iommu.o
+ifeq ($(CONFIG_SOC_ZUMA),y)
+exynos-pcie-iommu-objs += exynos-pcie-iommu-zuma.o
+else
+exynos-pcie-iommu-objs += exynos-pcie-iommu-whi.o
+endif

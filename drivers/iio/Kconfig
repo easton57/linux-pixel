@@ -12,6 +12,8 @@ menuconfig IIO
 
 if IIO
 
+source "drivers/iio/power/Kconfig"
+
 config IIO_BUFFER
 	bool "Enable buffer support within IIO"
 	help

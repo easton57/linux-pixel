@@ -11,6 +11,13 @@ menuconfig SPMI
 
 if SPMI
 
+config SPMI_BITBANG
+	tristate "SPMI BITBANG Driver"
+	default n
+	depends on SPMI
+	help
+		SPMI Bitbang Driver
+
 config SPMI_HISI3670
 	tristate "Hisilicon 3670 SPMI Controller"
 	select IRQ_DOMAIN_HIERARCHY

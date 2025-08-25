@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Copyright (c) 2021, Iskren Chernev <iskren.chernev@gmail.com>
+ */
+
+/dts-v1/;
+
+#include "zuma.dtsi"
+
+/ {
+	model = "Google Pixel 8 Pro";
+	compatible = "google,husky", "google,zuma";
+};

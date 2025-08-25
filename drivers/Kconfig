@@ -239,34 +239,4 @@ source "drivers/peci/Kconfig"
 
 source "drivers/hte/Kconfig"
 
-# # # # # # # # # # # # # #
-# Google specific drivers #
-# # # # # # # # # # # # # # 
-
-source "drivers/edgetpu/Kconfig"
-
-source "drivers/amplifiers/Kconfig"
-
-source "drivers/aoc/Kconfig"
-
-source "drivers/bluetooth/Kconfig"
-
-source "drivers/bms/Kconfig"
-
-source "drivers/display/Kconfig"
-
-source "drivers/gps/Kconfig"
-
-source "drivers/nfc/Kconfig"
-
-source "drivers/trusty/Kconfig"
-
-source "drivers/bts/Kconfig"
-
-source "drivers/devfreq-whi/Kconfig"
-
-source "drivers/gpu/Kconfig"
-
-source "drivers/performance/Kconfig"
-
 endmenu

@@ -530,7 +530,7 @@ int snd_soc_component_compr_get_caps(struct snd_compr_stream *cstream,
 	struct snd_soc_component *component;
 	int i, ret = 0;
 
-	snd_soc_dpcm_mutex_lock(rtd);
+	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
 	for_each_rtd_components(rtd, i, component) {
 		if (component->driver->compress_ops &&
@@ -541,7 +541,7 @@ int snd_soc_component_compr_get_caps(struct snd_compr_stream *cstream,
 		}
 	}
 
-	snd_soc_dpcm_mutex_unlock(rtd);
+	mutex_unlock(&rtd->card->pcm_mutex);
 
 	return soc_component_ret(component, ret);
 }
@@ -554,7 +554,7 @@ int snd_soc_component_compr_get_codec_caps(struct snd_compr_stream *cstream,
 	struct snd_soc_component *component;
 	int i, ret = 0;
 
-	snd_soc_dpcm_mutex_lock(rtd);
+	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
 	for_each_rtd_components(rtd, i, component) {
 		if (component->driver->compress_ops &&
@@ -565,7 +565,7 @@ int snd_soc_component_compr_get_codec_caps(struct snd_compr_stream *cstream,
 		}
 	}
 
-	snd_soc_dpcm_mutex_unlock(rtd);
+	mutex_unlock(&rtd->card->pcm_mutex);
 
 	return soc_component_ret(component, ret);
 }
@@ -618,7 +618,7 @@ int snd_soc_component_compr_copy(struct snd_compr_stream *cstream,
 	struct snd_soc_component *component;
 	int i, ret = 0;
 
-	snd_soc_dpcm_mutex_lock(rtd);
+	mutex_lock_nested(&rtd->card->pcm_mutex, rtd->card->pcm_subclass);
 
 	for_each_rtd_components(rtd, i, component) {
 		if (component->driver->compress_ops &&
@@ -629,7 +629,7 @@ int snd_soc_component_compr_copy(struct snd_compr_stream *cstream,
 		}
 	}
 
-	snd_soc_dpcm_mutex_unlock(rtd);
+	mutex_unlock(&rtd->card->pcm_mutex);
 
 	return soc_component_ret(component, ret);
 }

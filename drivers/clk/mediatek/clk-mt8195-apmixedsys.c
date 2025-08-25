@@ -167,5 +167,4 @@ static struct platform_driver clk_mt8195_apmixed_drv = {
 		.of_match_table = of_match_clk_mt8195_apmixed,
 	},
 };
-module_platform_driver(clk_mt8195_apmixed_drv);
-MODULE_LICENSE("GPL");
+builtin_platform_driver(clk_mt8195_apmixed_drv);

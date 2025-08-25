@@ -987,7 +987,7 @@ static bool __inet_csk_reqsk_queue_drop(struct sock *sk,
 {
 	bool unlinked = reqsk_queue_unlink(req);
 
-	if (!from_timer && del_timer_sync(&req->rsk_timer))
+	if (!from_timer && timer_delete_sync(&req->rsk_timer))
 		reqsk_put(req);
 
 	if (unlinked) {
@@ -1184,7 +1184,6 @@ struct sock *inet_csk_clone_lock(const struct sock *sk,
 	if (newsk) {
 		struct inet_connection_sock *newicsk = inet_csk(newsk);
 
-		newsk->sk_wait_pending = 0;
 		inet_sk_set_state(newsk, TCP_SYN_RECV);
 		newicsk->icsk_bind_hash = NULL;
 		newicsk->icsk_bind2_hash = NULL;

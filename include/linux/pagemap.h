@@ -137,8 +137,6 @@ static inline bool mapping_empty(struct address_space *mapping)
 	return xa_empty(&mapping->i_pages);
 }
 
-extern void _trace_android_rvh_mapping_shrinkable(bool *shrinkable);
-
 /*
  * mapping_shrinkable - test if page cache state allows inode reclaim
  * @mapping: the page cache mapping
@@ -163,11 +161,7 @@ extern void _trace_android_rvh_mapping_shrinkable(bool *shrinkable);
 static inline bool mapping_shrinkable(struct address_space *mapping)
 {
 	void *head;
-	bool shrinkable = false;
 
-	_trace_android_rvh_mapping_shrinkable(&shrinkable);
-	if (shrinkable)
-		return true;
 	/*
 	 * On highmem systems, there could be lowmem pressure from the
 	 * inodes before there is highmem pressure from the page
@@ -524,12 +518,10 @@ static inline struct page *page_cache_alloc(struct address_space *x)
 	return __page_cache_alloc(mapping_gfp_mask(x));
 }
 
-static inline gfp_t __readahead_gfp_mask(struct address_space *x)
+static inline gfp_t readahead_gfp_mask(struct address_space *x)
 {
 	return mapping_gfp_mask(x) | __GFP_NORETRY | __GFP_NOWARN;
 }
-
-gfp_t readahead_gfp_mask(struct address_space *x);
 
 typedef int filler_t(struct file *, struct folio *);
 
@@ -923,7 +915,8 @@ static inline bool wake_page_match(struct wait_page_queue *wait_page,
 
 void __folio_lock(struct folio *folio);
 int __folio_lock_killable(struct folio *folio);
-vm_fault_t __folio_lock_or_retry(struct folio *folio, struct vm_fault *vmf);
+bool __folio_lock_or_retry(struct folio *folio, struct mm_struct *mm,
+				unsigned int flags);
 void unlock_page(struct page *page);
 void folio_unlock(struct folio *folio);
 
@@ -1037,13 +1030,11 @@ static inline int lock_page_killable(struct page *page)
  * Return value and mmap_lock implications depend on flags; see
  * __folio_lock_or_retry().
  */
-static inline vm_fault_t folio_lock_or_retry(struct folio *folio,
-					     struct vm_fault *vmf)
+static inline bool folio_lock_or_retry(struct folio *folio,
+		struct mm_struct *mm, unsigned int flags)
 {
 	might_sleep();
-	if (!folio_trylock(folio))
-		return __folio_lock_or_retry(folio, vmf);
-	return 0;
+	return folio_trylock(folio) || __folio_lock_or_retry(folio, mm, flags);
 }
 
 /*

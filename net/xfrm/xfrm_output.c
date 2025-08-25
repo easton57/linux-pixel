@@ -480,11 +480,13 @@ static int xfrm_outer_mode_output(struct xfrm_state *x, struct sk_buff *skb)
 	return -EOPNOTSUPP;
 }
 
+#if IS_ENABLED(CONFIG_NET_PKTGEN)
 int pktgen_xfrm_outer_mode_output(struct xfrm_state *x, struct sk_buff *skb)
 {
 	return xfrm_outer_mode_output(x, skb);
 }
 EXPORT_SYMBOL_GPL(pktgen_xfrm_outer_mode_output);
+#endif
 
 static int xfrm_output_one(struct sk_buff *skb, int err)
 {
@@ -610,7 +612,7 @@ EXPORT_SYMBOL_GPL(xfrm_output_resume);
 
 static int xfrm_output2(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-	return xfrm_output_resume(skb->sk, skb, 1);
+	return xfrm_output_resume(sk, skb, 1);
 }
 
 static int xfrm_output_gso(struct net *net, struct sock *sk, struct sk_buff *skb)
@@ -736,7 +738,7 @@ int xfrm_output(struct sock *sk, struct sk_buff *skb)
 		skb->encapsulation = 1;
 
 		if (skb_is_gso(skb)) {
-			if (skb->inner_protocol)
+			if (skb->inner_protocol && x->props.mode == XFRM_MODE_TUNNEL)
 				return xfrm_output_gso(net, sk, skb);
 
 			skb_shinfo(skb)->gso_type |= SKB_GSO_ESP;

@@ -140,5 +140,5 @@ static struct platform_driver clk_mt7622_eth_drv = {
 		.of_match_table = of_match_clk_mt7622_eth,
 	},
 };
-module_platform_driver(clk_mt7622_eth_drv);
-MODULE_LICENSE("GPL");
+
+builtin_platform_driver(clk_mt7622_eth_drv);

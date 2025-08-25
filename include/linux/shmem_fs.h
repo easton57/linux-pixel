@@ -9,7 +9,6 @@
 #include <linux/percpu_counter.h>
 #include <linux/xattr.h>
 #include <linux/fs_parser.h>
-#include <linux/android_vendor.h>
 
 /* inode in-kernel data */
 
@@ -28,8 +27,6 @@ struct shmem_inode_info {
 	struct timespec64	i_crtime;	/* file creation time */
 	unsigned int		fsflags;	/* flags for FS_IOC_[SG]ETFLAGS */
 	struct inode		vfs_inode;
-
-	ANDROID_VENDOR_DATA(1);
 };
 
 #define SHMEM_FL_USER_VISIBLE		FS_FL_USER_VISIBLE

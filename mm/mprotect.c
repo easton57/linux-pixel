@@ -17,7 +17,6 @@
 #include <linux/highmem.h>
 #include <linux/security.h>
 #include <linux/mempolicy.h>
-#include <linux/pgsize_migration.h>
 #include <linux/personality.h>
 #include <linux/syscalls.h>
 #include <linux/swap.h>
@@ -543,7 +542,6 @@ static const struct mm_walk_ops prot_none_walk_ops = {
 	.pte_entry		= prot_none_pte_entry,
 	.hugetlb_entry		= prot_none_hugetlb_entry,
 	.test_walk		= prot_none_test,
-	.walk_lock		= PGWALK_WRLOCK,
 };
 
 int
@@ -632,8 +630,7 @@ success:
 	 * vm_flags and vm_page_prot are protected by the mmap_lock
 	 * held in write mode.
 	 */
-	vma_start_write(vma);
-	vm_flags_reset(vma, newflags);
+	vma->vm_flags = newflags;
 	/*
 	 * We want to check manually if we can change individual PTEs writable
 	 * if we can't do that automatically for all PTEs in a mapping. For

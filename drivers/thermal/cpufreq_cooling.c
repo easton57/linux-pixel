@@ -24,7 +24,6 @@
 #include <linux/units.h>
 
 #include <trace/events/thermal.h>
-#include <trace/hooks/thermal.h>
 
 /*
  * Cooling state <-> CPUFreq frequency
@@ -58,8 +57,6 @@ struct time_in_idle {
  * @max_level: maximum cooling level. One less than total number of valid
  *	cpufreq frequencies.
  * @em: Reference on the Energy Model of the device
- * @cdev: thermal_cooling_device pointer to keep track of the
- *	registered cooling device.
  * @policy: cpufreq policy.
  * @cooling_ops: cpufreq callbacks to thermal cooling device ops
  * @idle_time: idle time stats
@@ -227,8 +224,6 @@ static int cpufreq_get_requested_power(struct thermal_cooling_device *cdev,
 
 	freq = cpufreq_quick_get(policy->cpu);
 
-	trace_android_vh_modify_thermal_request_freq(policy, &freq);
-
 	for_each_cpu(cpu, policy->related_cpus) {
 		u32 load;
 
@@ -307,8 +302,6 @@ static int cpufreq_power2state(struct thermal_cooling_device *cdev,
 	last_load = cpufreq_cdev->last_load ?: 1;
 	normalised_power = (power * 100) / last_load;
 	target_freq = cpu_power_to_freq(cpufreq_cdev, normalised_power);
-
-	trace_android_vh_modify_thermal_target_freq(policy, &target_freq);
 
 	*state = get_level(cpufreq_cdev, target_freq);
 	trace_thermal_power_cpu_limit(policy->related_cpus, target_freq, *state,

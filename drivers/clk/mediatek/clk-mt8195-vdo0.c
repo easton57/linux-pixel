@@ -144,5 +144,4 @@ static struct platform_driver clk_mt8195_vdo0_drv = {
 		.name = "clk-mt8195-vdo0",
 	},
 };
-module_platform_driver(clk_mt8195_vdo0_drv);
-MODULE_LICENSE("GPL");
+builtin_platform_driver(clk_mt8195_vdo0_drv);

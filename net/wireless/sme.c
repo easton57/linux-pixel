@@ -807,10 +807,6 @@ void __cfg80211_connect_result(struct net_device *dev,
 		}
 
 		for_each_valid_link(cr, link) {
-			/* don't do extra lookups for failures */
-			if (cr->links[link].status != WLAN_STATUS_SUCCESS)
-				continue;
-
 			if (cr->links[link].bss)
 				continue;
 
@@ -847,16 +843,6 @@ void __cfg80211_connect_result(struct net_device *dev,
 	}
 
 	memset(wdev->links, 0, sizeof(wdev->links));
-	for_each_valid_link(cr, link) {
-		if (cr->links[link].status == WLAN_STATUS_SUCCESS)
-			continue;
-		cr->valid_links &= ~BIT(link);
-		/* don't require bss pointer for failed links */
-		if (!cr->links[link].bss)
-			continue;
-		cfg80211_unhold_bss(bss_from_pub(cr->links[link].bss));
-		cfg80211_put_bss(wdev->wiphy, cr->links[link].bss);
-	}
 	wdev->valid_links = cr->valid_links;
 	for_each_valid_link(cr, link)
 		wdev->links[link].client.current_bss =
@@ -1044,7 +1030,6 @@ void cfg80211_connect_done(struct net_device *dev,
 			cfg80211_hold_bss(
 				bss_from_pub(params->links[link].bss));
 		ev->cr.links[link].bss = params->links[link].bss;
-		ev->cr.links[link].status = params->links[link].status;
 
 		if (params->links[link].addr) {
 			ev->cr.links[link].addr = next;
@@ -1282,48 +1267,39 @@ out:
 }
 EXPORT_SYMBOL(cfg80211_roamed);
 
-void __cfg80211_port_authorized(struct wireless_dev *wdev, const u8 *peer_addr,
-				const u8 *td_bitmap, u8 td_bitmap_len)
+void __cfg80211_port_authorized(struct wireless_dev *wdev, const u8 *bssid)
 {
 	ASSERT_WDEV_LOCK(wdev);
 
 	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_STATION &&
-		wdev->iftype != NL80211_IFTYPE_P2P_CLIENT &&
-		wdev->iftype != NL80211_IFTYPE_AP &&
-		wdev->iftype != NL80211_IFTYPE_P2P_GO))
+		    wdev->iftype != NL80211_IFTYPE_P2P_CLIENT))
 		return;
 
-	if (wdev->iftype == NL80211_IFTYPE_STATION ||
-	    wdev->iftype == NL80211_IFTYPE_P2P_CLIENT) {
-		if (WARN_ON(!wdev->connected) ||
-		    WARN_ON(!ether_addr_equal(wdev->u.client.connected_addr, peer_addr)))
-			return;
-	}
+	if (WARN_ON(!wdev->connected) ||
+	    WARN_ON(!ether_addr_equal(wdev->u.client.connected_addr, bssid)))
+		return;
 
 	nl80211_send_port_authorized(wiphy_to_rdev(wdev->wiphy), wdev->netdev,
-				     peer_addr, td_bitmap, td_bitmap_len);
+				     bssid);
 }
 
-void cfg80211_port_authorized(struct net_device *dev, const u8 *peer_addr,
-			      const u8 *td_bitmap, u8 td_bitmap_len, gfp_t gfp)
+void cfg80211_port_authorized(struct net_device *dev, const u8 *bssid,
+			      gfp_t gfp)
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
 	struct cfg80211_event *ev;
 	unsigned long flags;
 
-	if (WARN_ON(!peer_addr))
+	if (WARN_ON(!bssid))
 		return;
 
-	ev = kzalloc(sizeof(*ev) + td_bitmap_len, gfp);
+	ev = kzalloc(sizeof(*ev), gfp);
 	if (!ev)
 		return;
 
 	ev->type = EVENT_PORT_AUTHORIZED;
-	memcpy(ev->pa.peer_addr, peer_addr, ETH_ALEN);
-	ev->pa.td_bitmap = ((u8 *)ev) + sizeof(*ev);
-	ev->pa.td_bitmap_len = td_bitmap_len;
-	memcpy((void *)ev->pa.td_bitmap, td_bitmap, td_bitmap_len);
+	memcpy(ev->pa.bssid, bssid, ETH_ALEN);
 
 	/*
 	 * Use the wdev event list so that if there are pending
@@ -1353,7 +1329,6 @@ void __cfg80211_disconnected(struct net_device *dev, const u8 *ie,
 		return;
 
 	cfg80211_wdev_release_bsses(wdev);
-	wdev->valid_links = 0;
 	wdev->connected = false;
 	wdev->u.client.ssid_len = 0;
 	wdev->conn_owner_nlportid = 0;

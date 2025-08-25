@@ -25,9 +25,6 @@ obj-$(CONFIG_PCIE_TEGRA194) += pcie-tegra194.o
 obj-$(CONFIG_PCIE_UNIPHIER) += pcie-uniphier.o
 obj-$(CONFIG_PCIE_UNIPHIER_EP) += pcie-uniphier-ep.o
 obj-$(CONFIG_PCIE_VISCONTI_HOST) += pcie-visconti.o
-obj-$(CONFIG_PCI_EXYNOS_GS) += pcie-exynos-gs.o
-pcie-exynos-gs-objs += pcie-exynos-rc.o pcie-exynos-dbg.o
-obj-$(CONFIG_PCI_EXYNOS_CAL_ZUMA) += pcie-exynos-zuma-rc-cal.o
 
 # The following drivers are for devices that use the generic ACPI
 # pci_root.c driver but don't support standard ECAM config access.

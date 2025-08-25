@@ -694,9 +694,6 @@ int __xfrm_state_delete(struct xfrm_state *x)
 		net->xfrm.state_num--;
 		spin_unlock(&net->xfrm.xfrm_state_lock);
 
-		if (x->encap_sk)
-			sock_put(rcu_dereference_raw(x->encap_sk));
-
 		xfrm_dev_state_delete(x);
 
 		/* All xfrm_state objects are created by xfrm_state_alloc.
@@ -1277,6 +1274,9 @@ static void __xfrm_state_insert(struct xfrm_state *x)
 	unsigned int h;
 
 	list_add(&x->km.all, &net->xfrm.state_all);
+
+	/* Sanitize mark before store */
+	x->mark.v &= x->mark.m;
 
 	h = xfrm_dst_hash(net, &x->id.daddr, &x->props.saddr,
 			  x->props.reqid, x->props.family);
@@ -2442,22 +2442,19 @@ int xfrm_user_policy(struct sock *sk, int optname, sockptr_t optval, int optlen)
 	if (IS_ERR(data))
 		return PTR_ERR(data);
 
-	/* Use the 64-bit / untranslated format on Android, even for compat */
-	if (!IS_ENABLED(CONFIG_GKI_NET_XFRM_HACKS) || IS_ENABLED(CONFIG_XFRM_USER_COMPAT)) {
-		if (in_compat_syscall()) {
-			struct xfrm_translator *xtr = xfrm_get_translator();
+	if (in_compat_syscall()) {
+		struct xfrm_translator *xtr = xfrm_get_translator();
 
-			if (!xtr) {
-				kfree(data);
-				return -EOPNOTSUPP;
-			}
+		if (!xtr) {
+			kfree(data);
+			return -EOPNOTSUPP;
+		}
 
-			err = xtr->xlate_user_policy_sockptr(&data, optlen);
-			xfrm_put_translator(xtr);
-			if (err) {
-				kfree(data);
-				return err;
-			}
+		err = xtr->xlate_user_policy_sockptr(&data, optlen);
+		xfrm_put_translator(xtr);
+		if (err) {
+			kfree(data);
+			return err;
 		}
 	}
 

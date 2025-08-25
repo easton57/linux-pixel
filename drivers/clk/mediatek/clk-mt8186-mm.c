@@ -109,5 +109,4 @@ static struct platform_driver clk_mt8186_mm_drv = {
 		.name = "clk-mt8186-mm",
 	},
 };
-module_platform_driver(clk_mt8186_mm_drv);
-MODULE_LICENSE("GPL");
+builtin_platform_driver(clk_mt8186_mm_drv);

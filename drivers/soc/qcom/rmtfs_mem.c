@@ -30,7 +30,7 @@ struct qcom_rmtfs_mem {
 
 	unsigned int client_id;
 
-	u64 perms;
+	unsigned int perms;
 };
 
 static ssize_t qcom_rmtfs_mem_show(struct device *dev,

@@ -434,18 +434,13 @@ static inline bool ksm_test_exit(struct mm_struct *mm)
  * of the process that owns 'vma'.  We also do not want to enforce
  * protection keys here anyway.
  */
-static int break_ksm(struct vm_area_struct *vma, unsigned long addr, bool lock_vma)
+static int break_ksm(struct vm_area_struct *vma, unsigned long addr)
 {
 	struct page *page;
 	vm_fault_t ret = 0;
 
 	do {
 		cond_resched();
-		if (lock_vma)
-			vma_start_write(vma);
-		else
-			mmap_assert_locked(vma->vm_mm);
-
 		page = follow_page(vma, addr,
 				FOLL_GET | FOLL_MIGRATION | FOLL_REMOTE);
 		if (IS_ERR_OR_NULL(page))
@@ -516,7 +511,7 @@ static void break_cow(struct ksm_rmap_item *rmap_item)
 	mmap_read_lock(mm);
 	vma = find_mergeable_vma(mm, addr);
 	if (vma)
-		break_ksm(vma, addr, false);
+		break_ksm(vma, addr);
 	mmap_read_unlock(mm);
 }
 
@@ -819,7 +814,7 @@ static void remove_trailing_rmap_items(struct ksm_rmap_item **rmap_list)
  * in cmp_and_merge_page on one of the rmap_items we would be removing.
  */
 static int unmerge_ksm_pages(struct vm_area_struct *vma,
-			     unsigned long start, unsigned long end, bool lock_vma)
+			     unsigned long start, unsigned long end)
 {
 	unsigned long addr;
 	int err = 0;
@@ -830,7 +825,7 @@ static int unmerge_ksm_pages(struct vm_area_struct *vma,
 		if (signal_pending(current))
 			err = -ERESTARTSYS;
 		else
-			err = break_ksm(vma, addr, lock_vma);
+			err = break_ksm(vma, addr);
 	}
 	return err;
 }
@@ -977,7 +972,7 @@ static int unmerge_and_remove_all_rmap_items(void)
 			if (!(vma->vm_flags & VM_MERGEABLE) || !vma->anon_vma)
 				continue;
 			err = unmerge_ksm_pages(vma,
-						vma->vm_start, vma->vm_end, false);
+						vma->vm_start, vma->vm_end);
 			if (err)
 				goto error;
 		}
@@ -2492,7 +2487,7 @@ int ksm_madvise(struct vm_area_struct *vma, unsigned long start,
 			return 0;		/* just ignore the advice */
 
 		if (vma->anon_vma) {
-			err = unmerge_ksm_pages(vma, start, end, true);
+			err = unmerge_ksm_pages(vma, start, end);
 			if (err)
 				return err;
 		}

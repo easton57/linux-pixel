@@ -100,4 +100,3 @@ static struct platform_driver clk_mt7986_apmixed_drv = {
 	},
 };
 builtin_platform_driver(clk_mt7986_apmixed_drv);
-MODULE_LICENSE("GPL");

@@ -47,10 +47,9 @@ static unsigned long nsec_low(unsigned long long nsec)
 #define SCHED_FEAT(name, enabled)	\
 	#name ,
 
-const char * const sched_feat_names[] = {
+static const char * const sched_feat_names[] = {
 #include "features.h"
 };
-EXPORT_SYMBOL_GPL(sched_feat_names);
 
 #undef SCHED_FEAT
 
@@ -79,7 +78,6 @@ static int sched_feat_show(struct seq_file *m, void *v)
 struct static_key sched_feat_keys[__SCHED_FEAT_NR] = {
 #include "features.h"
 };
-EXPORT_SYMBOL_GPL(sched_feat_keys);
 
 #undef SCHED_FEAT
 

@@ -9,7 +9,6 @@
 #include <linux/memory.h>
 #include <linux/hugetlb.h>
 #include <linux/page_owner.h>
-#include <linux/page_pinner.h>
 #include <linux/migrate.h>
 #include "internal.h"
 
@@ -434,7 +433,7 @@ static int isolate_single_pageblock(unsigned long boundary_pfn, int flags,
 				}
 
 				ret = __alloc_contig_migrate_range(&cc, head_pfn,
-							head_pfn + nr_pages, page_mt);
+							head_pfn + nr_pages);
 
 				/*
 				 * restore the page's migratetype so that it can
@@ -667,8 +666,6 @@ int test_pages_isolated(unsigned long start_pfn, unsigned long end_pfn,
 
 out:
 	trace_test_pages_isolated(start_pfn, end_pfn, pfn);
-	if (pfn < end_pfn)
-		page_pinner_failure_detect(pfn_to_page(pfn));
 
 	return ret;
 }

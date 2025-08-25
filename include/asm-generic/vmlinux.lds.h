@@ -461,7 +461,7 @@
 	. = ALIGN((align));						\
 	.rodata           : AT(ADDR(.rodata) - LOAD_OFFSET) {		\
 		__start_rodata = .;					\
-		*(.rodata) *(.rodata.*)					\
+		*(.rodata) *(.rodata.*) *(.data.rel.ro*)		\
 		SCHED_DATA						\
 		RO_AFTER_INIT_DATA	/* Read only after init */	\
 		. = ALIGN(8);						\
@@ -1026,19 +1026,14 @@
  * keep any .init_array.* sections.
  * https://bugs.llvm.org/show_bug.cgi?id=46478
  */
-#ifdef CONFIG_UNWIND_TABLES
-#define DISCARD_EH_FRAME
-#else
-#define DISCARD_EH_FRAME	*(.eh_frame)
-#endif
 #if defined(CONFIG_GCOV_KERNEL) || defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KCSAN)
 # ifdef CONFIG_CONSTRUCTORS
 #  define SANITIZER_DISCARDS						\
-	DISCARD_EH_FRAME
+	*(.eh_frame)
 # else
 #  define SANITIZER_DISCARDS						\
 	*(.init_array) *(.init_array.*)					\
-	DISCARD_EH_FRAME
+	*(.eh_frame)
 # endif
 #else
 # define SANITIZER_DISCARDS

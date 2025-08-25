@@ -385,24 +385,4 @@ config PCIE_FU740
 	  Say Y here if you want PCIe controller support for the SiFive
 	  FU740.
 
-config PCI_EXYNOS_GS
-	tristate "Exynos GS PCIe controller"
-	depends on PCI
-	depends on OF
-	depends on PCI_MSI_IRQ_DOMAIN
-	select PCIEPORTBUS
-	select PCIE_DW_HOST
-	help
-	  Enables support for the PCIe controller in the Samsung Exynos SoCs
-	  for GS101 to work in host mode. The PCI controller is based on the
-	  DesignWare hardware and therefore the driver re-uses the DesignWare
-	  core functions to implement the driver.
-
-config PCI_EXYNOS_CAL_ZUMA
-	tristate "Samsung Exynos PCIe PHY CAL for ZUMA"
-	depends on PCI
-	depends on OF
-	depends on PCI_MSI_IRQ_DOMAIN
-	select PCIE_DW_HOST
-
 endmenu

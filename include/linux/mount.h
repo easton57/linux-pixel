@@ -11,7 +11,6 @@
 #define _LINUX_MOUNT_H
 
 #include <linux/types.h>
-#include <linux/android_kabi.h>
 #include <asm/barrier.h>
 
 struct super_block;
@@ -72,11 +71,6 @@ struct vfsmount {
 	struct super_block *mnt_sb;	/* pointer to superblock */
 	int mnt_flags;
 	struct user_namespace *mnt_userns;
-
-	ANDROID_KABI_RESERVE(1);
-	ANDROID_KABI_RESERVE(2);
-	ANDROID_KABI_RESERVE(3);
-	ANDROID_KABI_RESERVE(4);
 } __randomize_layout;
 
 static inline struct user_namespace *mnt_user_ns(const struct vfsmount *mnt)

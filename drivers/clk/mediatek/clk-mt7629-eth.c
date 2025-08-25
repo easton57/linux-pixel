@@ -158,4 +158,3 @@ static struct platform_driver clk_mt7629_eth_drv = {
 };
 
 builtin_platform_driver(clk_mt7629_eth_drv);
-MODULE_LICENSE("GPL");

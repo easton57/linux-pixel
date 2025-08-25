@@ -16,10 +16,8 @@
 #ifdef CONFIG_CMA
 #include <linux/cma.h>
 #endif
-#include <trace/hooks/mm.h>
 #include <asm/page.h>
 #include "internal.h"
-#include <trace/hooks/mm.h>
 
 void __attribute__((weak)) arch_report_meminfo(struct seq_file *m)
 {
@@ -47,7 +45,6 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 
 	cached = global_node_page_state(NR_FILE_PAGES) -
 			total_swapcache_pages() - i.bufferram;
-	trace_android_vh_meminfo_cache_adjust(&cached);
 	if (cached < 0)
 		cached = 0;
 
@@ -157,8 +154,6 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	show_val_kb(m, "CmaFree:        ",
 		    global_zone_page_state(NR_FREE_CMA_PAGES));
 #endif
-	trace_android_vh_meminfo_proc_show(m);
-	trace_android_rvh_meminfo_proc_show(m);
 
 	hugetlb_report_meminfo(m);
 

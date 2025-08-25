@@ -81,6 +81,7 @@ struct net {
 						 * or to unregister pernet ops
 						 * (pernet_ops_rwsem write locked).
 						 */
+	struct llist_node	defer_free_list;
 	struct llist_node	cleanup_list;	/* namespaces on death row */
 
 #ifdef CONFIG_KEYS
@@ -187,36 +188,6 @@ struct net {
 	struct netns_smc	smc;
 #endif
 } __randomize_layout;
-
-/*
- * To work around a KMI issue, hooks_bridge[] could not be
- * added to struct netns_nf. Since the only use of netns_nf
- * is embedded in struct net, struct ext_net is added to
- * contain struct net plus the new field. Users of the new
- * field must use get_nf_hooks_bridge() to access the field.
- */
-struct ext_net {
-	struct net net;
-#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
-	struct nf_hook_entries __rcu *hooks_bridge[NF_INET_NUMHOOKS];
-#endif
-	ANDROID_VENDOR_DATA(1);
-};
-
-#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
-extern struct net init_net;
-extern struct nf_hook_entries **init_nf_hooks_bridgep;
-
-static inline struct nf_hook_entries __rcu **get_nf_hooks_bridge(const struct net *net)
-{
-	struct ext_net *ext_net;
-
-	if (net == &init_net)
-		return init_nf_hooks_bridgep;
-	ext_net = container_of(net, struct ext_net, net);
-	return ext_net->hooks_bridge;
-}
-#endif
 
 #include <linux/seq_file_net.h>
 
@@ -382,21 +353,30 @@ static inline void put_net_track(struct net *net, netns_tracker *tracker)
 
 typedef struct {
 #ifdef CONFIG_NET_NS
-	struct net *net;
+	struct net __rcu *net;
 #endif
 } possible_net_t;
 
 static inline void write_pnet(possible_net_t *pnet, struct net *net)
 {
 #ifdef CONFIG_NET_NS
-	pnet->net = net;
+	rcu_assign_pointer(pnet->net, net);
 #endif
 }
 
 static inline struct net *read_pnet(const possible_net_t *pnet)
 {
 #ifdef CONFIG_NET_NS
-	return pnet->net;
+	return rcu_dereference_protected(pnet->net, true);
+#else
+	return &init_net;
+#endif
+}
+
+static inline struct net *read_pnet_rcu(const possible_net_t *pnet)
+{
+#ifdef CONFIG_NET_NS
+	return rcu_dereference(pnet->net);
 #else
 	return &init_net;
 #endif
@@ -455,6 +435,9 @@ struct pernet_operations {
 	void (*pre_exit)(struct net *net);
 	void (*exit)(struct net *net);
 	void (*exit_batch)(struct list_head *net_exit_list);
+	/* Following method is called with RTNL held. */
+	void (*exit_batch_rtnl)(struct list_head *net_exit_list,
+				struct list_head *dev_kill_list);
 	unsigned int *id;
 	size_t size;
 };

@@ -16,5 +16,3 @@ dmabuf_selftests-y := \
 	st-dma-resv.o
 
 obj-$(CONFIG_DMABUF_SELFTESTS)	+= dmabuf_selftests.o
-
-obj-y += heaps/

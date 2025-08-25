@@ -330,14 +330,6 @@ struct io_ring_ctx {
 
 	struct list_head		io_buffers_pages;
 
-	/*
-	 * ANDROID: commit 6e5e6d274956 ("io_uring: drop any code related to
-	 * SCM_RIGHTS") removed this variable, but we add it back to preserve
-	 * the ABI.  The field is not used anywhere.
-	 */
-	#if defined(CONFIG_UNIX)
-		struct socket		*ring_sock;
-	#endif
 	/* hashed buffered write serialization */
 	struct io_wq_hash		*hash_map;
 
@@ -360,6 +352,11 @@ struct io_ring_ctx {
 	unsigned			sq_thread_idle;
 	/* protected by ->completion_lock */
 	unsigned			evfd_last_cq_tail;
+
+	unsigned short			n_ring_pages;
+	unsigned short			n_sqe_pages;
+	struct page			**ring_pages;
+	struct page			**sqe_pages;
 };
 
 enum {

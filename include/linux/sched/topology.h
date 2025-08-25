@@ -3,8 +3,6 @@
 #define _LINUX_SCHED_TOPOLOGY_H
 
 #include <linux/topology.h>
-#include <linux/android_kabi.h>
-#include <linux/android_vendor.h>
 
 #include <linux/sched/idle.h>
 
@@ -84,8 +82,6 @@ struct sched_domain_shared {
 	atomic_t	nr_busy_cpus;
 	int		has_idle_cores;
 	int		nr_idle_scan;
-
-	ANDROID_VENDOR_DATA(1);
 };
 
 struct sched_domain {
@@ -156,10 +152,6 @@ struct sched_domain {
 	struct sched_domain_shared *shared;
 
 	unsigned int span_weight;
-
-	ANDROID_KABI_RESERVE(1);
-	ANDROID_KABI_RESERVE(2);
-
 	/*
 	 * Span of all CPUs in this domain.
 	 *
@@ -186,7 +178,6 @@ extern void partition_sched_domains(int ndoms_new, cpumask_var_t doms_new[],
 cpumask_var_t *alloc_sched_domains(unsigned int ndoms);
 void free_sched_domains(cpumask_var_t doms[], unsigned int ndoms);
 
-bool cpus_equal_capacity(int this_cpu, int that_cpu);
 bool cpus_share_cache(int this_cpu, int that_cpu);
 
 typedef const struct cpumask *(*sched_domain_mask_f)(int cpu);
@@ -234,11 +225,6 @@ static inline void
 partition_sched_domains(int ndoms_new, cpumask_var_t doms_new[],
 			struct sched_domain_attr *dattr_new)
 {
-}
-
-static inline bool cpus_equal_capacity(int this_cpu, int that_cpu)
-{
-	return true;
 }
 
 static inline bool cpus_share_cache(int this_cpu, int that_cpu)

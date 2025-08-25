@@ -463,14 +463,6 @@ endmenu
 
 source "drivers/thermal/tegra/Kconfig"
 
-menu "Google thermal drivers"
-source "drivers/thermal/google/Kconfig"
-endmenu
-
-menu "Samsung thermal drivers"
-source "drivers/thermal/samsung/Kconfig"
-endmenu
-
 config GENERIC_ADC_THERMAL
 	tristate "Generic ADC based thermal sensor"
 	depends on IIO

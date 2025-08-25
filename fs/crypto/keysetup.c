@@ -44,21 +44,6 @@ struct fscrypt_mode fscrypt_modes[] = {
 		.security_strength = 16,
 		.ivsize = 16,
 	},
-	[FSCRYPT_MODE_SM4_XTS] = {
-		.friendly_name = "SM4-XTS",
-		.cipher_str = "xts(sm4)",
-		.keysize = 32,
-		.security_strength = 16,
-		.ivsize = 16,
-		.blk_crypto_mode = BLK_ENCRYPTION_MODE_SM4_XTS,
-	},
-	[FSCRYPT_MODE_SM4_CTS] = {
-		.friendly_name = "SM4-CTS-CBC",
-		.cipher_str = "cts(cbc(sm4))",
-		.keysize = 16,
-		.security_strength = 16,
-		.ivsize = 16,
-	},
 	[FSCRYPT_MODE_ADIANTUM] = {
 		.friendly_name = "Adiantum",
 		.cipher_str = "adiantum(xchacha12,aes)",
@@ -125,7 +110,7 @@ fscrypt_allocate_skcipher(struct fscrypt_mode *mode, const u8 *raw_key,
 		pr_info("fscrypt: %s using implementation \"%s\"\n",
 			mode->friendly_name, crypto_skcipher_driver_name(tfm));
 	}
-	if (WARN_ON_ONCE(crypto_skcipher_ivsize(tfm) != mode->ivsize)) {
+	if (WARN_ON(crypto_skcipher_ivsize(tfm) != mode->ivsize)) {
 		err = -EINVAL;
 		goto err_free_tfm;
 	}
@@ -153,9 +138,7 @@ int fscrypt_prepare_key(struct fscrypt_prepared_key *prep_key,
 	struct crypto_skcipher *tfm;
 
 	if (fscrypt_using_inline_encryption(ci))
-		return fscrypt_prepare_inline_crypt_key(prep_key, raw_key,
-							ci->ci_mode->keysize,
-							false, ci);
+		return fscrypt_prepare_inline_crypt_key(prep_key, raw_key, ci);
 
 	tfm = fscrypt_allocate_skcipher(ci->ci_mode, raw_key, ci->ci_inode);
 	if (IS_ERR(tfm))
@@ -196,28 +179,13 @@ static int setup_per_mode_enc_key(struct fscrypt_info *ci,
 	struct fscrypt_mode *mode = ci->ci_mode;
 	const u8 mode_num = mode - fscrypt_modes;
 	struct fscrypt_prepared_key *prep_key;
-	u8 mode_key[FSCRYPT_MAX_STANDARD_KEY_SIZE];
+	u8 mode_key[FSCRYPT_MAX_KEY_SIZE];
 	u8 hkdf_info[sizeof(mode_num) + sizeof(sb->s_uuid)];
 	unsigned int hkdf_infolen = 0;
-	bool use_hw_wrapped_key = false;
 	int err;
 
-	if (WARN_ON_ONCE(mode_num > FSCRYPT_MODE_MAX))
+	if (WARN_ON(mode_num > FSCRYPT_MODE_MAX))
 		return -EINVAL;
-
-	if (mk->mk_secret.is_hw_wrapped && S_ISREG(inode->i_mode)) {
-		/* Using a hardware-wrapped key for file contents encryption */
-		if (!fscrypt_using_inline_encryption(ci)) {
-			if (sb->s_flags & SB_INLINECRYPT)
-				fscrypt_warn(ci->ci_inode,
-					     "Hardware-wrapped key required, but no suitable inline encryption capabilities are available");
-			else
-				fscrypt_warn(ci->ci_inode,
-					     "Hardware-wrapped keys require inline encryption (-o inlinecrypt)");
-			return -EINVAL;
-		}
-		use_hw_wrapped_key = true;
-	}
 
 	prep_key = &keys[mode_num];
 	if (fscrypt_is_key_prepared(prep_key, ci)) {
@@ -229,16 +197,6 @@ static int setup_per_mode_enc_key(struct fscrypt_info *ci,
 
 	if (fscrypt_is_key_prepared(prep_key, ci))
 		goto done_unlock;
-
-	if (use_hw_wrapped_key) {
-		err = fscrypt_prepare_inline_crypt_key(prep_key,
-						       mk->mk_secret.raw,
-						       mk->mk_secret.size, true,
-						       ci);
-		if (err)
-			goto out_unlock;
-		goto done_unlock;
-	}
 
 	BUILD_BUG_ON(sizeof(mode_num) != 1);
 	BUILD_BUG_ON(sizeof(sb->s_uuid) != 16);
@@ -309,8 +267,8 @@ int fscrypt_derive_dirhash_key(struct fscrypt_info *ci,
 void fscrypt_hash_inode_number(struct fscrypt_info *ci,
 			       const struct fscrypt_master_key *mk)
 {
-	WARN_ON_ONCE(ci->ci_inode->i_ino == 0);
-	WARN_ON_ONCE(!mk->mk_ino_hash_key_initialized);
+	WARN_ON(ci->ci_inode->i_ino == 0);
+	WARN_ON(!mk->mk_ino_hash_key_initialized);
 
 	ci->ci_hashed_ino = (u32)siphash_1u64(ci->ci_inode->i_ino,
 					      &mk->mk_ino_hash_key);
@@ -362,14 +320,6 @@ static int fscrypt_setup_v2_file_key(struct fscrypt_info *ci,
 {
 	int err;
 
-	if (mk->mk_secret.is_hw_wrapped &&
-	    !(ci->ci_policy.v2.flags & (FSCRYPT_POLICY_FLAG_IV_INO_LBLK_64 |
-					FSCRYPT_POLICY_FLAG_IV_INO_LBLK_32))) {
-		fscrypt_warn(ci->ci_inode,
-			     "Hardware-wrapped keys are only supported with IV_INO_LBLK policies");
-		return -EINVAL;
-	}
-
 	if (ci->ci_policy.v2.flags & FSCRYPT_POLICY_FLAG_DIRECT_KEY) {
 		/*
 		 * DIRECT_KEY: instead of deriving per-file encryption keys, the
@@ -396,7 +346,7 @@ static int fscrypt_setup_v2_file_key(struct fscrypt_info *ci,
 		   FSCRYPT_POLICY_FLAG_IV_INO_LBLK_32) {
 		err = fscrypt_setup_iv_ino_lblk_32_key(ci, mk);
 	} else {
-		u8 derived_key[FSCRYPT_MAX_STANDARD_KEY_SIZE];
+		u8 derived_key[FSCRYPT_MAX_KEY_SIZE];
 
 		err = fscrypt_hkdf_expand(&mk->mk_secret.hkdf,
 					  HKDF_CONTEXT_PER_FILE_ENC_KEY,
@@ -473,41 +423,22 @@ static int setup_file_encryption_key(struct fscrypt_info *ci,
 				     bool need_dirhash_key,
 				     struct fscrypt_master_key **mk_ret)
 {
-	struct super_block *sb = ci->ci_inode->i_sb;
 	struct fscrypt_key_specifier mk_spec;
 	struct fscrypt_master_key *mk;
 	int err;
+
+	err = fscrypt_select_encryption_impl(ci);
+	if (err)
+		return err;
 
 	err = fscrypt_policy_to_key_spec(&ci->ci_policy, &mk_spec);
 	if (err)
 		return err;
 
-	mk = fscrypt_find_master_key(sb, &mk_spec);
-	if (unlikely(!mk)) {
-		const union fscrypt_policy *dummy_policy =
-			fscrypt_get_dummy_policy(sb);
-
-		/*
-		 * Add the test_dummy_encryption key on-demand.  In principle,
-		 * it should be added at mount time.  Do it here instead so that
-		 * the individual filesystems don't need to worry about adding
-		 * this key at mount time and cleaning up on mount failure.
-		 */
-		if (dummy_policy &&
-		    fscrypt_policies_equal(dummy_policy, &ci->ci_policy)) {
-			err = fscrypt_add_test_dummy_key(sb, &mk_spec);
-			if (err)
-				return err;
-			mk = fscrypt_find_master_key(sb, &mk_spec);
-		}
-	}
-	if (unlikely(!mk)) {
+	mk = fscrypt_find_master_key(ci->ci_inode->i_sb, &mk_spec);
+	if (!mk) {
 		if (ci->ci_policy.version != FSCRYPT_POLICY_V1)
 			return -ENOKEY;
-
-		err = fscrypt_select_encryption_impl(ci, false);
-		if (err)
-			return err;
 
 		/*
 		 * As a legacy fallback for v1 policies, search for the key in
@@ -530,27 +461,15 @@ static int setup_file_encryption_key(struct fscrypt_info *ci,
 		goto out_release_key;
 	}
 
-	err = fscrypt_select_encryption_impl(ci, mk->mk_secret.is_hw_wrapped);
-	if (err)
-		goto out_release_key;
-
 	switch (ci->ci_policy.version) {
 	case FSCRYPT_POLICY_V1:
-		if (WARN_ON(mk->mk_secret.is_hw_wrapped)) {
-			/*
-			 * This should never happen, as adding a v1 policy key
-			 * that is hardware-wrapped isn't allowed.
-			 */
-			err = -EINVAL;
-			goto out_release_key;
-		}
 		err = fscrypt_setup_v1_file_key(ci, mk->mk_secret.raw);
 		break;
 	case FSCRYPT_POLICY_V2:
 		err = fscrypt_setup_v2_file_key(ci, mk, need_dirhash_key);
 		break;
 	default:
-		WARN_ON_ONCE(1);
+		WARN_ON(1);
 		err = -EINVAL;
 		break;
 	}
@@ -590,7 +509,7 @@ static void put_crypt_info(struct fscrypt_info *ci)
 		spin_lock(&mk->mk_decrypted_inodes_lock);
 		list_del(&ci->ci_master_key_link);
 		spin_unlock(&mk->mk_decrypted_inodes_lock);
-		fscrypt_put_master_key_activeref(ci->ci_inode->i_sb, mk);
+		fscrypt_put_master_key_activeref(mk);
 	}
 	memzero_explicit(ci, sizeof(*ci));
 	kmem_cache_free(fscrypt_info_cachep, ci);
@@ -607,7 +526,7 @@ fscrypt_setup_encryption_info(struct inode *inode,
 	struct fscrypt_master_key *mk = NULL;
 	int res;
 
-	res = fscrypt_initialize(inode->i_sb);
+	res = fscrypt_initialize(inode->i_sb->s_cop->flags);
 	if (res)
 		return res;
 
@@ -624,13 +543,8 @@ fscrypt_setup_encryption_info(struct inode *inode,
 		res = PTR_ERR(mode);
 		goto out;
 	}
-	WARN_ON_ONCE(mode->ivsize > FSCRYPT_MAX_IV_SIZE);
+	WARN_ON(mode->ivsize > FSCRYPT_MAX_IV_SIZE);
 	crypt_info->ci_mode = mode;
-
-	crypt_info->ci_data_unit_bits =
-		fscrypt_policy_du_bits(&crypt_info->ci_policy, inode);
-	crypt_info->ci_data_units_per_block_bits =
-		inode->i_blkbits - crypt_info->ci_data_unit_bits;
 
 	res = setup_file_encryption_key(crypt_info, need_dirhash_key, &mk);
 	if (res)

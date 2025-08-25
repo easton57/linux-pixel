@@ -980,7 +980,7 @@ static struct virtio_driver virtio_fs_driver = {
 #endif
 };
 
-static void virtio_fs_wake_forget_and_unlock(struct fuse_iqueue *fiq, bool sync)
+static void virtio_fs_wake_forget_and_unlock(struct fuse_iqueue *fiq)
 __releases(fiq->lock)
 {
 	struct fuse_forget_link *link;
@@ -1015,8 +1015,7 @@ __releases(fiq->lock)
 	kfree(link);
 }
 
-static void virtio_fs_wake_interrupt_and_unlock(struct fuse_iqueue *fiq,
-						bool sync)
+static void virtio_fs_wake_interrupt_and_unlock(struct fuse_iqueue *fiq)
 __releases(fiq->lock)
 {
 	/*
@@ -1231,8 +1230,7 @@ out:
 	return ret;
 }
 
-static void virtio_fs_wake_pending_and_unlock(struct fuse_iqueue *fiq,
-					      bool sync)
+static void virtio_fs_wake_pending_and_unlock(struct fuse_iqueue *fiq)
 __releases(fiq->lock)
 {
 	unsigned int queue_id = VQ_REQUEST; /* TODO multiqueue */
@@ -1430,6 +1428,9 @@ static int virtio_fs_get_tree(struct fs_context *fsc)
 	struct fuse_mount *fm;
 	unsigned int virtqueue_size;
 	int err = -EIO;
+
+	if (!fsc->source)
+		return invalf(fsc, "No source specified");
 
 	/* This gets a reference on virtio_fs object. This ptr gets installed
 	 * in fc->iq->priv. Once fuse_conn is going away, it calls ->put()

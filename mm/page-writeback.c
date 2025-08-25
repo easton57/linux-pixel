@@ -38,7 +38,6 @@
 #include <linux/sched/signal.h>
 #include <linux/mm_inline.h>
 #include <trace/events/writeback.h>
-#include <trace/hooks/mm.h>
 
 #include "internal.h"
 
@@ -541,8 +540,8 @@ static int dirty_ratio_handler(struct ctl_table *table, int write, void *buffer,
 
 	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
 	if (ret == 0 && write && vm_dirty_ratio != old_ratio) {
-		writeback_set_ratelimit();
 		vm_dirty_bytes = 0;
+		writeback_set_ratelimit();
 	}
 	return ret;
 }
@@ -1912,8 +1911,6 @@ int balance_dirty_pages_ratelimited_flags(struct address_space *mapping,
 
 	if (!(bdi->capabilities & BDI_CAP_WRITEBACK))
 		return ret;
-
-	trace_android_rvh_ctl_dirty_rate(NULL);
 
 	if (inode_cgwb_enabled(inode))
 		wb = wb_get_create_current(bdi, GFP_KERNEL);

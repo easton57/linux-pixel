@@ -442,10 +442,4 @@ config BT_VIRTIO
 	  Say Y here to compile support for HCI over Virtio into the
 	  kernel or say M to compile as a module.
 
-config MSM_BT_POWER
-	tristate "MSM BT Power driver"
-
-config NITROUS
-	tristate "Nitrous driver"
-
 endmenu

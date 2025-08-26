@@ -1,1 +1,0 @@
-obj-$(CONFIG_INPUT_DRV2624_HAPTICS)     += drv2624.o

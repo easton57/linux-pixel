@@ -36,11 +36,3 @@ obj-$(CONFIG_SYSCON_REBOOT_MODE) += syscon-reboot-mode.o
 obj-$(CONFIG_POWER_RESET_SC27XX) += sc27xx-poweroff.o
 obj-$(CONFIG_NVMEM_REBOOT_MODE) += nvmem-reboot-mode.o
 obj-$(CONFIG_POWER_MLXBF) += pwr-mlxbf.o
-
-pixel-reboot-$(CONFIG_SOC_GS101) += pixel-gs101-reboot.o
-pixel-reboot-$(CONFIG_SOC_GS201) += pixel-gs201-reboot.o
-pixel-reboot-$(CONFIG_SOC_ZUMA) += pixel-zuma-reboot.o
-
-obj-$(CONFIG_PIXEL_POWER_REBOOT) += pixel-reboot.o
-
-obj-$(CONFIG_DEBUG_REBOOT) += debug-reboot.o

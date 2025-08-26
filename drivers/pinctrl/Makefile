@@ -79,8 +79,3 @@ obj-y				+= ti/
 obj-$(CONFIG_PINCTRL_UNIPHIER)	+= uniphier/
 obj-$(CONFIG_PINCTRL_VISCONTI)	+= visconti/
 obj-$(CONFIG_ARCH_VT8500)	+= vt8500/
-
-obj-$(CONFIG_PINCTRL_SLG51000)	+= pinctrl-slg51000.o
-obj-$(CONFIG_PINCTRL_SLG51002)	+= pinctrl-slg51002.o
-
-obj-y	+= gs/

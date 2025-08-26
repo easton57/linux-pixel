@@ -194,23 +194,6 @@ source "drivers/input/misc/Kconfig"
 
 source "drivers/input/rmi4/Kconfig"
 
-config INPUT_KEYDEBUG
-	tristate "Long Press Key Debugging"
-	depends on INPUT && KERNEL_TOP
-	select INPUT_KEYCOMBO
-	help
-	  Say Y here if you want to hook debug function to dump information
-	  to debug device hang when some keys are long pressed.
-
-config INPUT_KEYCOMBO
-	tristate "Key combo"
-	depends on INPUT
-	help
-	  Say Y here if you want to take action when some keys are pressed;
-
-
-source "drivers/input/fingerprint/Kconfig"
-
 endif
 
 menu "Hardware I/O ports"

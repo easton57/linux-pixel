@@ -49,7 +49,3 @@ hci_uart-$(CONFIG_BT_HCIUART_QCA)	+= hci_qca.o
 hci_uart-$(CONFIG_BT_HCIUART_AG6XX)	+= hci_ag6xx.o
 hci_uart-$(CONFIG_BT_HCIUART_MRVL)	+= hci_mrvl.o
 hci_uart-objs				:= $(hci_uart-y)
-
-# TODO: Fix Kconfig dependencies
-obj-$(CONFIG_MSM_BT_POWER) := btpower.o
-obj-$(CONFIG_NITROUS) := nitrous.o

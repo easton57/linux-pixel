@@ -1559,24 +1559,6 @@ config SERIAL_SUNPLUS_CONSOLE
 	  you can alter that using a kernel command line option such as
 	  "console=ttySUPx".
 
-config SERIAL_EXYNOS
-	tristate "Exynos SoC serial support"
-	depends on SERIAL_SAMSUNG
-	select SERIAL_CORE
-	help
-	  Support for the on-chip UARTs on the Samsung Exynos series CPUs,
-	  providing /dev/ttySAC0, 1 and 2 (note, some machines may not
-	  provide all of these ports, depending on how the serial port
-	  pins are configured.
-
-config SERIAL_EXYNOS_UARTS
-	int
-	depends on SERIAL_EXYNOS
-	default 24
-	help
-	  Select the number of available UART ports for the Samsung
-	  Exynos serial driver
-
 endmenu
 
 config SERIAL_MCTRL_GPIO

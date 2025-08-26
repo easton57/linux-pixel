@@ -77,5 +77,3 @@ config TYPEC_WCOVE
 	  called typec_wcove.ko
 
 endif # TYPEC_TCPM
-
-source "drivers/usb/typec/tcpm/google/Kconfig"

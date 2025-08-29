@@ -2,12 +2,12 @@
 /*
  * thermal_exynos.h - Samsung Exynos TMU device tree definitions
  *
- *  Copyright (C) 2014 Samsung Electronics
- *  Lukasz Majewski <l.majewski@samsung.com>
+ *  Copyright (C) 2022 Samsung Electronics
+ *  Rajendra Varma <raj.varma@samsung.com>
  */
 
-#ifndef _EXYNOS_THERMAL_TMU_DT_H
-#define _EXYNOS_THERMAL_TMU_DT_H
+#ifndef _DT_BINDINGS_THERMAL_THERMAL_EXYNOS_H
+#define _DT_BINDINGS_THERMAL_THERMAL_EXYNOS_H
 
 #define TYPE_ONE_POINT_TRIMMING 0
 #define TYPE_ONE_POINT_TRIMMING_25 1
@@ -15,4 +15,5 @@
 #define TYPE_TWO_POINT_TRIMMING 3
 #define TYPE_NONE 4
 
-#endif /* _EXYNOS_THERMAL_TMU_DT_H */
+#endif /* _DT_BINDINGS_THERMAL_THERMAL_EXYNOS_H */
+

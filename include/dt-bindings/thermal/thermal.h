@@ -2,8 +2,8 @@
 /*
  * This header provides constants for most thermal bindings.
  *
- * Copyright (C) 2013 Texas Instruments
- *	Eduardo Valentin <eduardo.valentin@ti.com>
+ *  Copyright (C) 2022 Samsung Electronics
+ *  Rajendra Varma <raj.varma@samsung.com>
  */
 
 #ifndef _DT_BINDINGS_THERMAL_THERMAL_H

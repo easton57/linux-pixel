@@ -7,3 +7,10 @@
 - 16k include statements are disabled in the device trees for zuma
 
 ### 08-19-25 FIRST SUCCESSFUL BUILD AT THIS POINT ON MY LAPTOP WOOTWOOT
+
+## For your consideration
+
+### DTBO SHIZ
+- DTBO android info for pmos https://wiki.postmarketos.org/wiki/Android_DTB/DTBO_Format
+- DTBO format: https://source.android.com/docs/core/architecture/dto/partitions
+- DTB images: https://source.android.com/docs/core/architecture/bootloader/dtb-images

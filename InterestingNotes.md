@@ -8,9 +8,14 @@
 
 ### 08-19-25 FIRST SUCCESSFUL BUILD AT THIS POINT ON MY LAPTOP WOOTWOOT
 
+### 08-31-25 Successful PMOS Build
+
 ## For your consideration
 
 ### DTBO SHIZ
 - DTBO android info for pmos https://wiki.postmarketos.org/wiki/Android_DTB/DTBO_Format
 - DTBO format: https://source.android.com/docs/core/architecture/dto/partitions
 - DTB images: https://source.android.com/docs/core/architecture/bootloader/dtb-images
+
+### Vendor Boot Analysis
+https://wiki.postmarketos.org/wiki/Porting_to_a_new_device/Device_specific_package#

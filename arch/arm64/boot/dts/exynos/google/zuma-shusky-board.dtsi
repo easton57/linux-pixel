@@ -19,4 +19,4 @@
 #include "zuma-shusky-typec.dtsi"
 #include "zuma-shusky-dma-heap.dtsi"
 #include "zuma/gs101-cp-s5200-thermal-zone.dtsi"
-// #include "zuma/zuma-16kb-dma-heap.dtsi"
+#include "zuma/zuma-16kb-dma-heap.dtsi"

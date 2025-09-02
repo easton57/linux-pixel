@@ -6,10 +6,6 @@
  *
  */
 
-#include <linux/kconfig.h>
-
-#if IS_ENABLED(CONFIG_ARM64_16K_PAGES)
-
 /*
  * The minimum allocation for CMA is usually one huge page.
  * The huge page size for 16kb page size config is 32MB.
@@ -30,5 +26,3 @@
 &vscaler {
 	size = <0x02000000>; /* 32MB */
 };
-
-#endif

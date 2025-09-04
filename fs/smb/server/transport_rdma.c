@@ -14,6 +14,7 @@
 #include <linux/mempool.h>
 #include <linux/highmem.h>
 #include <linux/scatterlist.h>
+#include <linux/string_choices.h>
 #include <rdma/ib_verbs.h>
 #include <rdma/rdma_cm.h>
 #include <rdma/rw.h>
@@ -21,7 +22,7 @@
 #include "glob.h"
 #include "connection.h"
 #include "smb_common.h"
-#include "smbstatus.h"
+#include "../common/smb2status.h"
 #include "transport_rdma.h"
 
 #define SMB_DIRECT_PORT_IWARP		5445
@@ -155,13 +156,14 @@ struct smb_direct_transport {
 };
 
 #define KSMBD_TRANS(t) ((struct ksmbd_transport *)&((t)->transport))
-
+#define SMBD_TRANS(t)	((struct smb_direct_transport *)container_of(t, \
+				struct smb_direct_transport, transport))
 enum {
 	SMB_DIRECT_MSG_NEGOTIATE_REQ = 0,
 	SMB_DIRECT_MSG_DATA_TRANSFER
 };
 
-static struct ksmbd_transport_ops ksmbd_smb_direct_transport_ops;
+static const struct ksmbd_transport_ops ksmbd_smb_direct_transport_ops;
 
 struct smb_direct_send_ctx {
 	struct list_head	msg_list;
@@ -338,7 +340,7 @@ static struct smb_direct_transport *alloc_transport(struct rdma_cm_id *cm_id)
 	struct smb_direct_transport *t;
 	struct ksmbd_conn *conn;
 
-	t = kzalloc(sizeof(*t), GFP_KERNEL);
+	t = kzalloc(sizeof(*t), KSMBD_DEFAULT_GFP);
 	if (!t)
 		return NULL;
 
@@ -380,6 +382,11 @@ static struct smb_direct_transport *alloc_transport(struct rdma_cm_id *cm_id)
 err:
 	kfree(t);
 	return NULL;
+}
+
+static void smb_direct_free_transport(struct ksmbd_transport *kt)
+{
+	kfree(SMBD_TRANS(kt));
 }
 
 static void free_transport(struct smb_direct_transport *t)
@@ -428,7 +435,6 @@ static void free_transport(struct smb_direct_transport *t)
 
 	smb_direct_destroy_pools(t);
 	ksmbd_conn_free(KSMBD_TRANS(t)->conn);
-	kfree(t);
 }
 
 static struct smb_direct_sendmsg
@@ -436,7 +442,7 @@ static struct smb_direct_sendmsg
 {
 	struct smb_direct_sendmsg *msg;
 
-	msg = mempool_alloc(t->sendmsg_mempool, GFP_KERNEL);
+	msg = mempool_alloc(t->sendmsg_mempool, KSMBD_DEFAULT_GFP);
 	if (!msg)
 		return ERR_PTR(-ENOMEM);
 	msg->transport = t;
@@ -1371,7 +1377,7 @@ static int smb_direct_rdma_xmit(struct smb_direct_transport *t,
 	}
 
 	ksmbd_debug(RDMA, "RDMA %s, len %#x, needed credits %#x\n",
-		    is_read ? "read" : "write", buf_len, credits_needed);
+		    str_read_write(is_read), buf_len, credits_needed);
 
 	ret = wait_for_rw_credits(t, credits_needed);
 	if (ret < 0)
@@ -1380,8 +1386,8 @@ static int smb_direct_rdma_xmit(struct smb_direct_transport *t,
 	/* build rdma_rw_ctx for each descriptor */
 	desc_buf = buf;
 	for (i = 0; i < desc_num; i++) {
-		msg = kzalloc(offsetof(struct smb_direct_rdma_rw_msg, sg_list) +
-			      sizeof(struct scatterlist) * SG_CHUNK_SIZE, GFP_KERNEL);
+		msg = kzalloc(struct_size(msg, sg_list, SG_CHUNK_SIZE),
+			      KSMBD_DEFAULT_GFP);
 		if (!msg) {
 			ret = -ENOMEM;
 			goto out;
@@ -1825,7 +1831,7 @@ static int smb_direct_create_pools(struct smb_direct_transport *t)
 	INIT_LIST_HEAD(&t->recvmsg_queue);
 
 	for (i = 0; i < t->recv_credit_max; i++) {
-		recvmsg = mempool_alloc(t->recvmsg_mempool, GFP_KERNEL);
+		recvmsg = mempool_alloc(t->recvmsg_mempool, KSMBD_DEFAULT_GFP);
 		if (!recvmsg)
 			goto err;
 		recvmsg->transport = t;
@@ -2118,7 +2124,7 @@ static int smb_direct_ib_client_add(struct ib_device *ib_dev)
 	if (!rdma_frwr_is_supported(&ib_dev->attrs))
 		return 0;
 
-	smb_dev = kzalloc(sizeof(*smb_dev), GFP_KERNEL);
+	smb_dev = kzalloc(sizeof(*smb_dev), KSMBD_DEFAULT_GFP);
 	if (!smb_dev)
 		return -ENOMEM;
 	smb_dev->ib_dev = ib_dev;
@@ -2188,7 +2194,7 @@ int ksmbd_rdma_init(void)
 	return 0;
 }
 
-void ksmbd_rdma_destroy(void)
+void ksmbd_rdma_stop_listening(void)
 {
 	if (!smb_direct_listener.cm_id)
 		return;
@@ -2197,7 +2203,10 @@ void ksmbd_rdma_destroy(void)
 	rdma_destroy_id(smb_direct_listener.cm_id);
 
 	smb_direct_listener.cm_id = NULL;
+}
 
+void ksmbd_rdma_destroy(void)
+{
 	if (smb_direct_wq) {
 		destroy_workqueue(smb_direct_wq);
 		smb_direct_wq = NULL;
@@ -2215,38 +2224,16 @@ bool ksmbd_rdma_capable_netdev(struct net_device *netdev)
 		for (i = 0; i < smb_dev->ib_dev->phys_port_cnt; i++) {
 			struct net_device *ndev;
 
-			if (smb_dev->ib_dev->ops.get_netdev) {
-				ndev = smb_dev->ib_dev->ops.get_netdev(
-					smb_dev->ib_dev, i + 1);
-				if (!ndev)
-					continue;
+			ndev = ib_device_get_netdev(smb_dev->ib_dev, i + 1);
+			if (!ndev)
+				continue;
 
-				if (ndev == netdev) {
-					dev_put(ndev);
-					rdma_capable = true;
-					goto out;
-				}
+			if (ndev == netdev) {
 				dev_put(ndev);
-			/* if ib_dev does not implement ops.get_netdev
-			 * check for matching infiniband GUID in hw_addr
-			 */
-			} else if (netdev->type == ARPHRD_INFINIBAND) {
-				struct netdev_hw_addr *ha;
-				union ib_gid gid;
-				u32 port_num;
-				int ret;
-
-				netdev_hw_addr_list_for_each(
-					ha, &netdev->dev_addrs) {
-					memcpy(&gid, ha->addr + 4, sizeof(gid));
-					ret = ib_find_gid(smb_dev->ib_dev, &gid,
-							  &port_num, NULL);
-					if (!ret) {
-						rdma_capable = true;
-						goto out;
-					}
-				}
+				rdma_capable = true;
+				goto out;
 			}
+			dev_put(ndev);
 		}
 	}
 out:
@@ -2257,16 +2244,18 @@ out:
 
 		ibdev = ib_device_get_by_netdev(netdev, RDMA_DRIVER_UNKNOWN);
 		if (ibdev) {
-			if (rdma_frwr_is_supported(&ibdev->attrs))
-				rdma_capable = true;
+			rdma_capable = rdma_frwr_is_supported(&ibdev->attrs);
 			ib_device_put(ibdev);
 		}
 	}
 
+	ksmbd_debug(RDMA, "netdev(%s) rdma capable : %s\n",
+		    netdev->name, str_true_false(rdma_capable));
+
 	return rdma_capable;
 }
 
-static struct ksmbd_transport_ops ksmbd_smb_direct_transport_ops = {
+static const struct ksmbd_transport_ops ksmbd_smb_direct_transport_ops = {
 	.prepare	= smb_direct_prepare,
 	.disconnect	= smb_direct_disconnect,
 	.shutdown	= smb_direct_shutdown,
@@ -2274,4 +2263,5 @@ static struct ksmbd_transport_ops ksmbd_smb_direct_transport_ops = {
 	.read		= smb_direct_read,
 	.rdma_read	= smb_direct_rdma_read,
 	.rdma_write	= smb_direct_rdma_write,
+	.free_transport = smb_direct_free_transport,
 };

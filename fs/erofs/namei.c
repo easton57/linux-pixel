@@ -99,7 +99,8 @@ static void *erofs_find_target_block(struct erofs_buf *target,
 		struct erofs_buf buf = __EROFS_BUF_INITIALIZER;
 		struct erofs_dirent *de;
 
-		de = erofs_bread(&buf, dir, mid, EROFS_KMAP);
+		buf.mapping = dir->i_mapping;
+		de = erofs_bread(&buf, erofs_pos(dir->i_sb, mid), true);
 		if (!IS_ERR(de)) {
 			const int nameoff = nameoff_from_disk(de->nameoff, bsz);
 			const int ndirents = nameoff / sizeof(*de);
@@ -170,6 +171,7 @@ int erofs_namei(struct inode *dir, const struct qstr *name, erofs_nid_t *nid,
 
 	qn.name = name->name;
 	qn.end = name->name + name->len;
+	buf.mapping = dir->i_mapping;
 
 	ndirents = 0;
 	de = erofs_find_target_block(&buf, dir, &qn, &ndirents);
@@ -217,6 +219,6 @@ const struct inode_operations erofs_dir_iops = {
 	.lookup = erofs_lookup,
 	.getattr = erofs_getattr,
 	.listxattr = erofs_listxattr,
-	.get_acl = erofs_get_acl,
+	.get_inode_acl = erofs_get_acl,
 	.fiemap = erofs_fiemap,
 };

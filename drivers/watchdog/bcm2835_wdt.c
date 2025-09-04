@@ -219,12 +219,10 @@ static int bcm2835_wdt_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int bcm2835_wdt_remove(struct platform_device *pdev)
+static void bcm2835_wdt_remove(struct platform_device *pdev)
 {
 	if (pm_power_off == bcm2835_power_off)
 		pm_power_off = NULL;
-
-	return 0;
 }
 
 static struct platform_driver bcm2835_wdt_driver = {

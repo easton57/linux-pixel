@@ -21,7 +21,7 @@
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include <drm/display/drm_dp_aux_bus.h>
 #include <drm/display/drm_dp_helper.h>
@@ -32,10 +32,10 @@
 #include <drm/drm_edid.h>
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_of.h>
-#include <drm/drm_panel.h>
 #include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
 
+#define SN_DEVICE_ID_REGS			0x00	/* up to 0x07 */
 #define SN_DEVICE_REV_REG			0x08
 #define SN_DPPLL_SRC_REG			0x0A
 #define  DPPLL_CLK_SRC_DSICLK			BIT(0)
@@ -196,8 +196,8 @@ struct ti_sn65dsi86 {
 	struct gpio_chip		gchip;
 	DECLARE_BITMAP(gchip_output, SN_NUM_GPIOS);
 #endif
-#if defined(CONFIG_PWM)
-	struct pwm_chip			pchip;
+#if IS_REACHABLE(CONFIG_PWM)
+	struct pwm_chip			*pchip;
 	bool				pwm_enabled;
 	atomic_t			pwm_pin_busy;
 #endif
@@ -244,11 +244,26 @@ static void ti_sn65dsi86_write_u16(struct ti_sn65dsi86 *pdata,
 	regmap_bulk_write(pdata->regmap, reg, buf, ARRAY_SIZE(buf));
 }
 
-static u32 ti_sn_bridge_get_dsi_freq(struct ti_sn65dsi86 *pdata)
+static struct drm_display_mode *
+get_new_adjusted_display_mode(struct drm_bridge *bridge,
+			      struct drm_atomic_state *state)
+{
+	struct drm_connector *connector =
+		drm_atomic_get_new_connector_for_encoder(state, bridge->encoder);
+	struct drm_connector_state *conn_state =
+		drm_atomic_get_new_connector_state(state, connector);
+	struct drm_crtc_state *crtc_state =
+		drm_atomic_get_new_crtc_state(state, conn_state->crtc);
+
+	return &crtc_state->adjusted_mode;
+}
+
+static u32 ti_sn_bridge_get_dsi_freq(struct ti_sn65dsi86 *pdata,
+				     struct drm_atomic_state *state)
 {
 	u32 bit_rate_khz, clk_freq_khz;
 	struct drm_display_mode *mode =
-		&pdata->bridge.encoder->crtc->state->adjusted_mode;
+		get_new_adjusted_display_mode(&pdata->bridge, state);
 
 	bit_rate_khz = mode->clock *
 			mipi_dsi_pixel_format_to_bpp(pdata->dsi->format);
@@ -275,7 +290,8 @@ static const u32 ti_sn_bridge_dsiclk_lut[] = {
 	460800000,
 };
 
-static void ti_sn_bridge_set_refclk_freq(struct ti_sn65dsi86 *pdata)
+static void ti_sn_bridge_set_refclk_freq(struct ti_sn65dsi86 *pdata,
+					 struct drm_atomic_state *state)
 {
 	int i;
 	u32 refclk_rate;
@@ -288,7 +304,7 @@ static void ti_sn_bridge_set_refclk_freq(struct ti_sn65dsi86 *pdata)
 		refclk_lut_size = ARRAY_SIZE(ti_sn_bridge_refclk_lut);
 		clk_prepare_enable(pdata->refclk);
 	} else {
-		refclk_rate = ti_sn_bridge_get_dsi_freq(pdata) * 1000;
+		refclk_rate = ti_sn_bridge_get_dsi_freq(pdata, state) * 1000;
 		refclk_lut = ti_sn_bridge_dsiclk_lut;
 		refclk_lut_size = ARRAY_SIZE(ti_sn_bridge_dsiclk_lut);
 	}
@@ -312,12 +328,13 @@ static void ti_sn_bridge_set_refclk_freq(struct ti_sn65dsi86 *pdata)
 	pdata->pwm_refclk_freq = ti_sn_bridge_refclk_lut[i];
 }
 
-static void ti_sn65dsi86_enable_comms(struct ti_sn65dsi86 *pdata)
+static void ti_sn65dsi86_enable_comms(struct ti_sn65dsi86 *pdata,
+				      struct drm_atomic_state *state)
 {
 	mutex_lock(&pdata->comms_mutex);
 
 	/* configure bridge ref_clk */
-	ti_sn_bridge_set_refclk_freq(pdata);
+	ti_sn_bridge_set_refclk_freq(pdata, state);
 
 	/*
 	 * HPD on this bridge chip is a bit useless.  This is an eDP bridge
@@ -373,7 +390,7 @@ static int __maybe_unused ti_sn65dsi86_resume(struct device *dev)
 	/* td2: min 100 us after regulators before enabling the GPIO */
 	usleep_range(100, 110);
 
-	gpiod_set_value(pdata->enable_gpio, 1);
+	gpiod_set_value_cansleep(pdata->enable_gpio, 1);
 
 	/*
 	 * If we have a reference clock we can enable communication w/ the
@@ -383,7 +400,7 @@ static int __maybe_unused ti_sn65dsi86_resume(struct device *dev)
 	 * clock so reading early doesn't work.
 	 */
 	if (pdata->refclk)
-		ti_sn65dsi86_enable_comms(pdata);
+		ti_sn65dsi86_enable_comms(pdata, NULL);
 
 	return ret;
 }
@@ -396,7 +413,7 @@ static int __maybe_unused ti_sn65dsi86_suspend(struct device *dev)
 	if (pdata->refclk)
 		ti_sn65dsi86_disable_comms(pdata);
 
-	gpiod_set_value(pdata->enable_gpio, 0);
+	gpiod_set_value_cansleep(pdata->enable_gpio, 0);
 
 	ret = regulator_bulk_disable(SN_REGULATOR_SUPPLY_NUM, pdata->supplies);
 	if (ret)
@@ -436,23 +453,6 @@ DEFINE_SHOW_ATTRIBUTE(status);
  * Auxiliary Devices (*not* AUX)
  */
 
-static void ti_sn65dsi86_uninit_aux(void *data)
-{
-	auxiliary_device_uninit(data);
-}
-
-static void ti_sn65dsi86_delete_aux(void *data)
-{
-	auxiliary_device_delete(data);
-}
-
-static void ti_sn65dsi86_aux_device_release(struct device *dev)
-{
-	struct auxiliary_device *aux = container_of(dev, struct auxiliary_device, dev);
-
-	kfree(aux);
-}
-
 static int ti_sn65dsi86_add_aux_device(struct ti_sn65dsi86 *pdata,
 				       struct auxiliary_device **aux_out,
 				       const char *name)
@@ -460,34 +460,16 @@ static int ti_sn65dsi86_add_aux_device(struct ti_sn65dsi86 *pdata,
 	struct device *dev = pdata->dev;
 	const struct i2c_client *client = to_i2c_client(dev);
 	struct auxiliary_device *aux;
-	int ret;
+	int id;
 
-	aux = kzalloc(sizeof(*aux), GFP_KERNEL);
+	id = (client->adapter->nr << 10) | client->addr;
+	aux = __devm_auxiliary_device_create(dev, KBUILD_MODNAME, name,
+					     NULL, id);
 	if (!aux)
-		return -ENOMEM;
+		return -ENODEV;
 
-	aux->name = name;
-	aux->id = (client->adapter->nr << 10) | client->addr;
-	aux->dev.parent = dev;
-	aux->dev.release = ti_sn65dsi86_aux_device_release;
-	device_set_of_node_from_dev(&aux->dev, dev);
-	ret = auxiliary_device_init(aux);
-	if (ret) {
-		kfree(aux);
-		return ret;
-	}
-	ret = devm_add_action_or_reset(dev, ti_sn65dsi86_uninit_aux, aux);
-	if (ret)
-		return ret;
-
-	ret = auxiliary_device_add(aux);
-	if (ret)
-		return ret;
-	ret = devm_add_action_or_reset(dev, ti_sn65dsi86_delete_aux, aux);
-	if (!ret)
-		*aux_out = aux;
-
-	return ret;
+	*aux_out = aux;
+	return 0;
 }
 
 /* -----------------------------------------------------------------------------
@@ -613,6 +595,24 @@ exit:
 	return len;
 }
 
+static int ti_sn_aux_wait_hpd_asserted(struct drm_dp_aux *aux, unsigned long wait_us)
+{
+	/*
+	 * The HPD in this chip is a bit useless (See comment in
+	 * ti_sn65dsi86_enable_comms) so if our driver is expected to wait
+	 * for HPD, we just assume it's asserted after the wait_us delay.
+	 *
+	 * In case we are asked to wait forever (wait_us=0) take conservative
+	 * 500ms delay.
+	 */
+	if (wait_us == 0)
+		wait_us = 500000;
+
+	usleep_range(wait_us, wait_us + 1000);
+
+	return 0;
+}
+
 static int ti_sn_aux_probe(struct auxiliary_device *adev,
 			   const struct auxiliary_device_id *id)
 {
@@ -622,6 +622,7 @@ static int ti_sn_aux_probe(struct auxiliary_device *adev,
 	pdata->aux.name = "ti-sn65dsi86-aux";
 	pdata->aux.dev = &adev->dev;
 	pdata->aux.transfer = ti_sn_aux_transfer;
+	pdata->aux.wait_hpd_asserted = ti_sn_aux_wait_hpd_asserted;
 	drm_dp_aux_init(&pdata->aux);
 
 	ret = devm_of_dp_aux_populate_ep_devices(&pdata->aux);
@@ -692,6 +693,7 @@ static int ti_sn_attach_host(struct auxiliary_device *adev, struct ti_sn65dsi86 
 }
 
 static int ti_sn_bridge_attach(struct drm_bridge *bridge,
+			       struct drm_encoder *encoder,
 			       enum drm_bridge_attach_flags flags)
 {
 	struct ti_sn65dsi86 *pdata = bridge_to_ti_sn65dsi86(bridge);
@@ -708,7 +710,7 @@ static int ti_sn_bridge_attach(struct drm_bridge *bridge,
 	 * Attach the next bridge.
 	 * We never want the next bridge to *also* create a connector.
 	 */
-	ret = drm_bridge_attach(bridge->encoder, pdata->next_bridge,
+	ret = drm_bridge_attach(encoder, pdata->next_bridge,
 				&pdata->bridge, flags | DRM_BRIDGE_ATTACH_NO_CONNECTOR);
 	if (ret < 0)
 		goto err_initted_aux;
@@ -773,7 +775,7 @@ ti_sn_bridge_mode_valid(struct drm_bridge *bridge,
 }
 
 static void ti_sn_bridge_atomic_disable(struct drm_bridge *bridge,
-					struct drm_bridge_state *old_bridge_state)
+					struct drm_atomic_state *state)
 {
 	struct ti_sn65dsi86 *pdata = bridge_to_ti_sn65dsi86(bridge);
 
@@ -781,12 +783,13 @@ static void ti_sn_bridge_atomic_disable(struct drm_bridge *bridge,
 	regmap_update_bits(pdata->regmap, SN_ENH_FRAME_REG, VSTREAM_ENABLE, 0);
 }
 
-static void ti_sn_bridge_set_dsi_rate(struct ti_sn65dsi86 *pdata)
+static void ti_sn_bridge_set_dsi_rate(struct ti_sn65dsi86 *pdata,
+				      struct drm_atomic_state *state)
 {
 	unsigned int bit_rate_mhz, clk_freq_mhz;
 	unsigned int val;
 	struct drm_display_mode *mode =
-		&pdata->bridge.encoder->crtc->state->adjusted_mode;
+		get_new_adjusted_display_mode(&pdata->bridge, state);
 
 	/* set DSIA clk frequency */
 	bit_rate_mhz = (mode->clock / 1000) *
@@ -816,12 +819,14 @@ static const unsigned int ti_sn_bridge_dp_rate_lut[] = {
 	0, 1620, 2160, 2430, 2700, 3240, 4320, 5400
 };
 
-static int ti_sn_bridge_calc_min_dp_rate_idx(struct ti_sn65dsi86 *pdata, unsigned int bpp)
+static int ti_sn_bridge_calc_min_dp_rate_idx(struct ti_sn65dsi86 *pdata,
+					     struct drm_atomic_state *state,
+					     unsigned int bpp)
 {
 	unsigned int bit_rate_khz, dp_rate_mhz;
 	unsigned int i;
 	struct drm_display_mode *mode =
-		&pdata->bridge.encoder->crtc->state->adjusted_mode;
+		get_new_adjusted_display_mode(&pdata->bridge, state);
 
 	/* Calculate minimum bit rate based on our pixel clock. */
 	bit_rate_khz = mode->clock * bpp;
@@ -920,10 +925,11 @@ static unsigned int ti_sn_bridge_read_valid_rates(struct ti_sn65dsi86 *pdata)
 	return valid_rates;
 }
 
-static void ti_sn_bridge_set_video_timings(struct ti_sn65dsi86 *pdata)
+static void ti_sn_bridge_set_video_timings(struct ti_sn65dsi86 *pdata,
+					   struct drm_atomic_state *state)
 {
 	struct drm_display_mode *mode =
-		&pdata->bridge.encoder->crtc->state->adjusted_mode;
+		get_new_adjusted_display_mode(&pdata->bridge, state);
 	u8 hsync_polarity = 0, vsync_polarity = 0;
 
 	if (mode->flags & DRM_MODE_FLAG_NHSYNC)
@@ -1033,7 +1039,7 @@ exit:
 }
 
 static void ti_sn_bridge_atomic_enable(struct drm_bridge *bridge,
-				       struct drm_bridge_state *old_bridge_state)
+				       struct drm_atomic_state *state)
 {
 	struct ti_sn65dsi86 *pdata = bridge_to_ti_sn65dsi86(bridge);
 	struct drm_connector *connector;
@@ -1045,7 +1051,7 @@ static void ti_sn_bridge_atomic_enable(struct drm_bridge *bridge,
 	int max_dp_lanes;
 	unsigned int bpp;
 
-	connector = drm_atomic_get_new_connector_for_encoder(old_bridge_state->base.state,
+	connector = drm_atomic_get_new_connector_for_encoder(state,
 							     bridge->encoder);
 	if (!connector) {
 		dev_err_ratelimited(pdata->dev, "Could not get the connector\n");
@@ -1065,7 +1071,7 @@ static void ti_sn_bridge_atomic_enable(struct drm_bridge *bridge,
 			   pdata->ln_polrs << LN_POLRS_OFFSET);
 
 	/* set dsi clk frequency value */
-	ti_sn_bridge_set_dsi_rate(pdata);
+	ti_sn_bridge_set_dsi_rate(pdata, state);
 
 	/*
 	 * The SN65DSI86 only supports ASSR Display Authentication method and
@@ -1100,7 +1106,7 @@ static void ti_sn_bridge_atomic_enable(struct drm_bridge *bridge,
 	valid_rates = ti_sn_bridge_read_valid_rates(pdata);
 
 	/* Train until we run out of rates */
-	for (dp_rate_idx = ti_sn_bridge_calc_min_dp_rate_idx(pdata, bpp);
+	for (dp_rate_idx = ti_sn_bridge_calc_min_dp_rate_idx(pdata, state, bpp);
 	     dp_rate_idx < ARRAY_SIZE(ti_sn_bridge_dp_rate_lut);
 	     dp_rate_idx++) {
 		if (!(valid_rates & BIT(dp_rate_idx)))
@@ -1116,7 +1122,7 @@ static void ti_sn_bridge_atomic_enable(struct drm_bridge *bridge,
 	}
 
 	/* config video parameters */
-	ti_sn_bridge_set_video_timings(pdata);
+	ti_sn_bridge_set_video_timings(pdata, state);
 
 	/* enable video stream */
 	regmap_update_bits(pdata->regmap, SN_ENH_FRAME_REG, VSTREAM_ENABLE,
@@ -1124,21 +1130,21 @@ static void ti_sn_bridge_atomic_enable(struct drm_bridge *bridge,
 }
 
 static void ti_sn_bridge_atomic_pre_enable(struct drm_bridge *bridge,
-					   struct drm_bridge_state *old_bridge_state)
+					   struct drm_atomic_state *state)
 {
 	struct ti_sn65dsi86 *pdata = bridge_to_ti_sn65dsi86(bridge);
 
 	pm_runtime_get_sync(pdata->dev);
 
 	if (!pdata->refclk)
-		ti_sn65dsi86_enable_comms(pdata);
+		ti_sn65dsi86_enable_comms(pdata, state);
 
 	/* td7: min 100 us after enable before DSI data */
 	usleep_range(100, 110);
 }
 
 static void ti_sn_bridge_atomic_post_disable(struct drm_bridge *bridge,
-					     struct drm_bridge_state *old_bridge_state)
+					     struct drm_atomic_state *state)
 {
 	struct ti_sn65dsi86 *pdata = bridge_to_ti_sn65dsi86(bridge);
 
@@ -1155,7 +1161,8 @@ static void ti_sn_bridge_atomic_post_disable(struct drm_bridge *bridge,
 	pm_runtime_put_sync(pdata->dev);
 }
 
-static enum drm_connector_status ti_sn_bridge_detect(struct drm_bridge *bridge)
+static enum drm_connector_status
+ti_sn_bridge_detect(struct drm_bridge *bridge, struct drm_connector *connector)
 {
 	struct ti_sn65dsi86 *pdata = bridge_to_ti_sn65dsi86(bridge);
 	int val = 0;
@@ -1173,12 +1180,12 @@ static enum drm_connector_status ti_sn_bridge_detect(struct drm_bridge *bridge)
 					 : connector_status_disconnected;
 }
 
-static struct edid *ti_sn_bridge_get_edid(struct drm_bridge *bridge,
-					  struct drm_connector *connector)
+static const struct drm_edid *ti_sn_bridge_edid_read(struct drm_bridge *bridge,
+						     struct drm_connector *connector)
 {
 	struct ti_sn65dsi86 *pdata = bridge_to_ti_sn65dsi86(bridge);
 
-	return drm_get_edid(connector, &pdata->aux.ddc);
+	return drm_edid_read_ddc(connector, &pdata->aux.ddc);
 }
 
 static void ti_sn65dsi86_debugfs_init(struct drm_bridge *bridge, struct dentry *root)
@@ -1214,7 +1221,7 @@ static const struct drm_bridge_funcs ti_sn_bridge_funcs = {
 	.attach = ti_sn_bridge_attach,
 	.detach = ti_sn_bridge_detach,
 	.mode_valid = ti_sn_bridge_mode_valid,
-	.get_edid = ti_sn_bridge_get_edid,
+	.edid_read = ti_sn_bridge_edid_read,
 	.detect = ti_sn_bridge_detect,
 	.atomic_pre_enable = ti_sn_bridge_atomic_pre_enable,
 	.atomic_enable = ti_sn_bridge_atomic_enable,
@@ -1309,7 +1316,6 @@ static int ti_sn_bridge_probe(struct auxiliary_device *adev,
 	if (ret)
 		return ret;
 
-	pdata->bridge.funcs = &ti_sn_bridge_funcs;
 	pdata->bridge.of_node = np;
 	pdata->bridge.type = pdata->next_bridge->type == DRM_MODE_CONNECTOR_DisplayPort
 			   ? DRM_MODE_CONNECTOR_DisplayPort : DRM_MODE_CONNECTOR_eDP;
@@ -1377,7 +1383,7 @@ static struct auxiliary_driver ti_sn_bridge_driver = {
 /* -----------------------------------------------------------------------------
  * PWM Controller
  */
-#if defined(CONFIG_PWM)
+#if IS_REACHABLE(CONFIG_PWM)
 static int ti_sn_pwm_pin_request(struct ti_sn65dsi86 *pdata)
 {
 	return atomic_xchg(&pdata->pwm_pin_busy, 1) ? -EBUSY : 0;
@@ -1390,7 +1396,7 @@ static void ti_sn_pwm_pin_release(struct ti_sn65dsi86 *pdata)
 
 static struct ti_sn65dsi86 *pwm_chip_to_ti_sn_bridge(struct pwm_chip *chip)
 {
-	return container_of(chip, struct ti_sn65dsi86, pchip);
+	return pwmchip_get_drvdata(chip);
 }
 
 static int ti_sn_pwm_request(struct pwm_chip *chip, struct pwm_device *pwm)
@@ -1431,11 +1437,9 @@ static int ti_sn_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 	int ret;
 
 	if (!pdata->pwm_enabled) {
-		ret = pm_runtime_get_sync(pdata->dev);
-		if (ret < 0) {
-			pm_runtime_put_sync(pdata->dev);
+		ret = pm_runtime_resume_and_get(pwmchip_parent(chip));
+		if (ret < 0)
 			return ret;
-		}
 	}
 
 	if (state->enabled) {
@@ -1449,7 +1453,7 @@ static int ti_sn_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 						 SN_GPIO_MUX_MASK << (2 * SN_PWM_GPIO_IDX),
 						 SN_GPIO_MUX_SPECIAL << (2 * SN_PWM_GPIO_IDX));
 			if (ret) {
-				dev_err(pdata->dev, "failed to mux in PWM function\n");
+				dev_err(pwmchip_parent(chip), "failed to mux in PWM function\n");
 				goto out;
 			}
 		}
@@ -1525,7 +1529,7 @@ static int ti_sn_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 
 		ret = regmap_write(pdata->regmap, SN_PWM_PRE_DIV_REG, pre_div);
 		if (ret) {
-			dev_err(pdata->dev, "failed to update PWM_PRE_DIV\n");
+			dev_err(pwmchip_parent(chip), "failed to update PWM_PRE_DIV\n");
 			goto out;
 		}
 
@@ -1537,7 +1541,7 @@ static int ti_sn_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 		     FIELD_PREP(SN_PWM_INV_MASK, state->polarity == PWM_POLARITY_INVERSED);
 	ret = regmap_write(pdata->regmap, SN_PWM_EN_INV_REG, pwm_en_inv);
 	if (ret) {
-		dev_err(pdata->dev, "failed to update PWM_EN/PWM_INV\n");
+		dev_err(pwmchip_parent(chip), "failed to update PWM_EN/PWM_INV\n");
 		goto out;
 	}
 
@@ -1545,7 +1549,7 @@ static int ti_sn_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 out:
 
 	if (!pdata->pwm_enabled)
-		pm_runtime_put_sync(pdata->dev);
+		pm_runtime_put_sync(pwmchip_parent(chip));
 
 	return ret;
 }
@@ -1562,19 +1566,19 @@ static int ti_sn_pwm_get_state(struct pwm_chip *chip, struct pwm_device *pwm,
 
 	ret = regmap_read(pdata->regmap, SN_PWM_EN_INV_REG, &pwm_en_inv);
 	if (ret)
-		return 0;
+		return ret;
 
 	ret = ti_sn65dsi86_read_u16(pdata, SN_BACKLIGHT_SCALE_REG, &scale);
 	if (ret)
-		return 0;
+		return ret;
 
 	ret = ti_sn65dsi86_read_u16(pdata, SN_BACKLIGHT_REG, &backlight);
 	if (ret)
-		return 0;
+		return ret;
 
 	ret = regmap_read(pdata->regmap, SN_PWM_PRE_DIV_REG, &pre_div);
 	if (ret)
-		return 0;
+		return ret;
 
 	state->enabled = FIELD_GET(SN_PWM_EN_MASK, pwm_en_inv);
 	if (FIELD_GET(SN_PWM_INV_MASK, pwm_en_inv))
@@ -1598,31 +1602,36 @@ static const struct pwm_ops ti_sn_pwm_ops = {
 	.free = ti_sn_pwm_free,
 	.apply = ti_sn_pwm_apply,
 	.get_state = ti_sn_pwm_get_state,
-	.owner = THIS_MODULE,
 };
 
 static int ti_sn_pwm_probe(struct auxiliary_device *adev,
 			   const struct auxiliary_device_id *id)
 {
+	struct pwm_chip *chip;
 	struct ti_sn65dsi86 *pdata = dev_get_drvdata(adev->dev.parent);
 
-	pdata->pchip.dev = pdata->dev;
-	pdata->pchip.ops = &ti_sn_pwm_ops;
-	pdata->pchip.npwm = 1;
-	pdata->pchip.of_xlate = of_pwm_single_xlate;
-	pdata->pchip.of_pwm_n_cells = 1;
+	pdata->pchip = chip = devm_pwmchip_alloc(&adev->dev, 1, 0);
+	if (IS_ERR(chip))
+		return PTR_ERR(chip);
 
-	return pwmchip_add(&pdata->pchip);
+	pwmchip_set_drvdata(chip, pdata);
+
+	chip->ops = &ti_sn_pwm_ops;
+	chip->of_xlate = of_pwm_single_xlate;
+
+	devm_pm_runtime_enable(&adev->dev);
+
+	return pwmchip_add(chip);
 }
 
 static void ti_sn_pwm_remove(struct auxiliary_device *adev)
 {
 	struct ti_sn65dsi86 *pdata = dev_get_drvdata(adev->dev.parent);
 
-	pwmchip_remove(&pdata->pchip);
+	pwmchip_remove(pdata->pchip);
 
 	if (pdata->pwm_enabled)
-		pm_runtime_put_sync(pdata->dev);
+		pm_runtime_put_sync(&adev->dev);
 }
 
 static const struct auxiliary_device_id ti_sn_pwm_id_table[] = {
@@ -1648,8 +1657,8 @@ static void ti_sn_pwm_unregister(void)
 }
 
 #else
-static inline int ti_sn_pwm_pin_request(struct ti_sn65dsi86 *pdata) { return 0; }
-static inline void ti_sn_pwm_pin_release(struct ti_sn65dsi86 *pdata) {}
+static inline int __maybe_unused ti_sn_pwm_pin_request(struct ti_sn65dsi86 *pdata) { return 0; }
+static inline void __maybe_unused ti_sn_pwm_pin_release(struct ti_sn65dsi86 *pdata) {}
 
 static inline int ti_sn_pwm_register(void) { return 0; }
 static inline void ti_sn_pwm_unregister(void) {}
@@ -1715,24 +1724,15 @@ static int ti_sn_bridge_gpio_get(struct gpio_chip *chip, unsigned int offset)
 	return !!(val & BIT(SN_GPIO_INPUT_SHIFT + offset));
 }
 
-static void ti_sn_bridge_gpio_set(struct gpio_chip *chip, unsigned int offset,
-				  int val)
+static int ti_sn_bridge_gpio_set(struct gpio_chip *chip, unsigned int offset,
+				 int val)
 {
 	struct ti_sn65dsi86 *pdata = gpiochip_get_data(chip);
-	int ret;
-
-	if (!test_bit(offset, pdata->gchip_output)) {
-		dev_err(pdata->dev, "Ignoring GPIO set while input\n");
-		return;
-	}
 
 	val &= 1;
-	ret = regmap_update_bits(pdata->regmap, SN_GPIO_IO_REG,
-				 BIT(SN_GPIO_OUTPUT_SHIFT + offset),
-				 val << (SN_GPIO_OUTPUT_SHIFT + offset));
-	if (ret)
-		dev_warn(pdata->dev,
-			 "Failed to set bridge GPIO %u: %d\n", offset, ret);
+	return regmap_update_bits(pdata->regmap, SN_GPIO_IO_REG,
+				  BIT(SN_GPIO_OUTPUT_SHIFT + offset),
+				  val << (SN_GPIO_OUTPUT_SHIFT + offset));
 }
 
 static int ti_sn_bridge_gpio_direction_input(struct gpio_chip *chip,
@@ -1902,11 +1902,11 @@ static int ti_sn65dsi86_parse_regulators(struct ti_sn65dsi86 *pdata)
 				       pdata->supplies);
 }
 
-static int ti_sn65dsi86_probe(struct i2c_client *client,
-			      const struct i2c_device_id *id)
+static int ti_sn65dsi86_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct ti_sn65dsi86 *pdata;
+	u8 id_buf[8];
 	int ret;
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
@@ -1914,9 +1914,9 @@ static int ti_sn65dsi86_probe(struct i2c_client *client,
 		return -ENODEV;
 	}
 
-	pdata = devm_kzalloc(dev, sizeof(struct ti_sn65dsi86), GFP_KERNEL);
-	if (!pdata)
-		return -ENOMEM;
+	pdata = devm_drm_bridge_alloc(dev, struct ti_sn65dsi86, bridge, &ti_sn_bridge_funcs);
+	if (IS_ERR(pdata))
+		return PTR_ERR(pdata);
 	dev_set_drvdata(dev, pdata);
 	pdata->dev = dev;
 
@@ -1950,6 +1950,16 @@ static int ti_sn65dsi86_probe(struct i2c_client *client,
 	if (ret)
 		return ret;
 
+	pm_runtime_get_sync(dev);
+	ret = regmap_bulk_read(pdata->regmap, SN_DEVICE_ID_REGS, id_buf, ARRAY_SIZE(id_buf));
+	pm_runtime_put_autosuspend(dev);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to read device id\n");
+
+	/* The ID string is stored backwards */
+	if (strncmp(id_buf, "68ISD   ", ARRAY_SIZE(id_buf)))
+		return dev_err_probe(dev, -EOPNOTSUPP, "unsupported device id\n");
+
 	/*
 	 * Break ourselves up into a collection of aux devices. The only real
 	 * motiviation here is to solve the chicken-and-egg problem of probe
@@ -1967,7 +1977,7 @@ static int ti_sn65dsi86_probe(struct i2c_client *client,
 			return ret;
 	}
 
-	if (IS_ENABLED(CONFIG_PWM)) {
+	if (IS_REACHABLE(CONFIG_PWM)) {
 		ret = ti_sn65dsi86_add_aux_device(pdata, &pdata->pwm_aux, "pwm");
 		if (ret)
 			return ret;
@@ -1982,9 +1992,9 @@ static int ti_sn65dsi86_probe(struct i2c_client *client,
 	return ti_sn65dsi86_add_aux_device(pdata, &pdata->aux_aux, "aux");
 }
 
-static struct i2c_device_id ti_sn65dsi86_id[] = {
-	{ "ti,sn65dsi86", 0},
-	{},
+static const struct i2c_device_id ti_sn65dsi86_id[] = {
+	{ "ti,sn65dsi86" },
+	{}
 };
 MODULE_DEVICE_TABLE(i2c, ti_sn65dsi86_id);
 

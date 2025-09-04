@@ -37,7 +37,6 @@
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/random.h>
-#include <linux/io-mapping.h>
 #include <linux/mlx5/driver.h>
 #include <linux/mlx5/eq.h>
 #include <linux/debugfs.h>
@@ -95,6 +94,11 @@ static u16 in_to_opcode(void *in)
 	return MLX5_GET(mbox_in, in, opcode);
 }
 
+static u16 in_to_uid(void *in)
+{
+	return MLX5_GET(mbox_in, in, uid);
+}
+
 /* Returns true for opcodes that might be triggered very frequently and throttle
  * the command interface. Limit their command slots usage.
  */
@@ -105,6 +109,7 @@ static bool mlx5_cmd_is_throttle_opcode(u16 op)
 	case MLX5_CMD_OP_DESTROY_GENERAL_OBJECT:
 	case MLX5_CMD_OP_MODIFY_GENERAL_OBJECT:
 	case MLX5_CMD_OP_QUERY_GENERAL_OBJECT:
+	case MLX5_CMD_OP_SYNC_CRYPTO:
 		return true;
 	}
 	return false;
@@ -527,6 +532,8 @@ static int mlx5_internal_err_ret_value(struct mlx5_core_dev *dev, u16 op,
 	case MLX5_CMD_OP_QUERY_VHCA_MIGRATION_STATE:
 	case MLX5_CMD_OP_SAVE_VHCA_STATE:
 	case MLX5_CMD_OP_LOAD_VHCA_STATE:
+	case MLX5_CMD_OP_SYNC_CRYPTO:
+	case MLX5_CMD_OP_ALLOW_OTHER_VHCA_ACCESS:
 		*status = MLX5_DRIVER_STATUS_ABORTED;
 		*synd = MLX5_DRIVER_SYND;
 		return -ENOLINK;
@@ -729,6 +736,8 @@ const char *mlx5_command_str(int command)
 	MLX5_COMMAND_STR_CASE(QUERY_VHCA_MIGRATION_STATE);
 	MLX5_COMMAND_STR_CASE(SAVE_VHCA_STATE);
 	MLX5_COMMAND_STR_CASE(LOAD_VHCA_STATE);
+	MLX5_COMMAND_STR_CASE(SYNC_CRYPTO);
+	MLX5_COMMAND_STR_CASE(ALLOW_OTHER_VHCA_ACCESS);
 	default: return "unknown command opcode";
 	}
 }
@@ -750,6 +759,8 @@ static const char *cmd_status_str(u8 status)
 		return "bad resource";
 	case MLX5_CMD_STAT_RES_BUSY:
 		return "resource busy";
+	case MLX5_CMD_STAT_NOT_READY:
+		return "FW not ready";
 	case MLX5_CMD_STAT_LIM_ERR:
 		return "limits exceeded";
 	case MLX5_CMD_STAT_BAD_RES_STATE_ERR:
@@ -783,6 +794,7 @@ static int cmd_status_to_err(u8 status)
 	case MLX5_CMD_STAT_BAD_SYS_STATE_ERR:		return -EIO;
 	case MLX5_CMD_STAT_BAD_RES_ERR:			return -EINVAL;
 	case MLX5_CMD_STAT_RES_BUSY:			return -EBUSY;
+	case MLX5_CMD_STAT_NOT_READY:			return -EAGAIN;
 	case MLX5_CMD_STAT_LIM_ERR:			return -ENOMEM;
 	case MLX5_CMD_STAT_BAD_RES_STATE_ERR:		return -EINVAL;
 	case MLX5_CMD_STAT_IX_ERR:			return -EINVAL;
@@ -811,13 +823,16 @@ EXPORT_SYMBOL(mlx5_cmd_out_err);
 static void cmd_status_print(struct mlx5_core_dev *dev, void *in, void *out)
 {
 	u16 opcode, op_mod;
+	u8 status;
 	u16 uid;
 
 	opcode = in_to_opcode(in);
 	op_mod = MLX5_GET(mbox_in, in, op_mod);
-	uid    = MLX5_GET(mbox_in, in, uid);
+	uid    = in_to_uid(in);
+	status = MLX5_GET(mbox_out, out, status);
 
-	if (!uid && opcode != MLX5_CMD_OP_DESTROY_MKEY)
+	if (!uid && opcode != MLX5_CMD_OP_DESTROY_MKEY &&
+	    opcode != MLX5_CMD_OP_CREATE_UCTX && status != MLX5_CMD_STAT_NOT_READY)
 		mlx5_cmd_out_err(dev, opcode, op_mod, out);
 }
 
@@ -912,8 +927,7 @@ static void mlx5_cmd_comp_handler(struct mlx5_core_dev *dev, u64 vec, bool force
 
 static void cb_timeout_handler(struct work_struct *work)
 {
-	struct delayed_work *dwork = container_of(work, struct delayed_work,
-						  work);
+	struct delayed_work *dwork = to_delayed_work(work);
 	struct mlx5_cmd_work_ent *ent = container_of(dwork,
 						     struct mlx5_cmd_work_ent,
 						     cb_timeout_work);
@@ -1248,8 +1262,8 @@ static int mlx5_cmd_invoke(struct mlx5_core_dev *dev, struct mlx5_cmd_msg *in,
 		goto out_free;
 
 	ds = ent->ts2 - ent->ts1;
-	if (ent->op < MLX5_CMD_OP_MAX) {
-		stats = &cmd->stats[ent->op];
+	stats = xa_load(&cmd->stats, ent->op);
+	if (stats) {
 		spin_lock_irq(&stats->lock);
 		stats->sum += ds;
 		++stats->n;
@@ -1721,8 +1735,8 @@ static void mlx5_cmd_comp_handler(struct mlx5_core_dev *dev, u64 vec, bool force
 
 			if (ent->callback) {
 				ds = ent->ts2 - ent->ts1;
-				if (ent->op < MLX5_CMD_OP_MAX) {
-					stats = &cmd->stats[ent->op];
+				stats = xa_load(&cmd->stats, ent->op);
+				if (stats) {
 					spin_lock_irqsave(&stats->lock, flags);
 					stats->sum += ds;
 					++stats->n;
@@ -1829,7 +1843,7 @@ static struct mlx5_cmd_msg *alloc_msg(struct mlx5_core_dev *dev, int in_size,
 	if (in_size <= 16)
 		goto cache_miss;
 
-	for (i = 0; i < MLX5_NUM_COMMAND_CACHES; i++) {
+	for (i = 0; i < dev->profile.num_cmd_caches; i++) {
 		ch = &cmd->cache[i];
 		if (in_size > ch->max_inbox_size)
 			continue;
@@ -1861,6 +1875,17 @@ static int is_manage_pages(void *in)
 	return in_to_opcode(in) == MLX5_CMD_OP_MANAGE_PAGES;
 }
 
+static bool mlx5_has_privileged_uid(struct mlx5_core_dev *dev)
+{
+	return !xa_empty(&dev->cmd.vars.privileged_uids);
+}
+
+static bool mlx5_cmd_is_privileged_uid(struct mlx5_core_dev *dev,
+				       u16 uid)
+{
+	return !!xa_load(&dev->cmd.vars.privileged_uids, uid);
+}
+
 /*  Notes:
  *    1. Callback functions may not sleep
  *    2. Page queue commands do not support asynchrous completion
@@ -1871,7 +1896,9 @@ static int cmd_exec(struct mlx5_core_dev *dev, void *in, int in_size, void *out,
 {
 	struct mlx5_cmd_msg *inb, *outb;
 	u16 opcode = in_to_opcode(in);
-	bool throttle_op;
+	bool throttle_locked = false;
+	bool unpriv_locked = false;
+	u16 uid = in_to_uid(in);
 	int pages_queue;
 	gfp_t gfp;
 	u8 token;
@@ -1880,12 +1907,19 @@ static int cmd_exec(struct mlx5_core_dev *dev, void *in, int in_size, void *out,
 	if (mlx5_cmd_is_down(dev) || !opcode_allowed(&dev->cmd, opcode))
 		return -ENXIO;
 
-	throttle_op = mlx5_cmd_is_throttle_opcode(opcode);
-	if (throttle_op) {
-		/* atomic context may not sleep */
-		if (callback)
-			return -EINVAL;
-		down(&dev->cmd.vars.throttle_sem);
+	if (!callback) {
+		/* The semaphore is already held for callback commands. It was
+		 * acquired in mlx5_cmd_exec_cb()
+		 */
+		if (uid && mlx5_has_privileged_uid(dev)) {
+			if (!mlx5_cmd_is_privileged_uid(dev, uid)) {
+				unpriv_locked = true;
+				down(&dev->cmd.vars.unprivileged_sem);
+			}
+		} else if (mlx5_cmd_is_throttle_opcode(opcode)) {
+			throttle_locked = true;
+			down(&dev->cmd.vars.throttle_sem);
+		}
 	}
 
 	pages_queue = is_manage_pages(in);
@@ -1929,8 +1963,11 @@ out_out:
 out_in:
 	free_msg(dev, inb);
 out_up:
-	if (throttle_op)
+	if (throttle_locked)
 		up(&dev->cmd.vars.throttle_sem);
+	if (unpriv_locked)
+		up(&dev->cmd.vars.unprivileged_sem);
+
 	return err;
 }
 
@@ -1949,12 +1986,15 @@ static void cmd_status_log(struct mlx5_core_dev *dev, u16 opcode, u8 status,
 {
 	const char *namep = mlx5_command_str(opcode);
 	struct mlx5_cmd_stats *stats;
+	unsigned long flags;
 
 	if (!err || !(strcmp(namep, "unknown command opcode")))
 		return;
 
-	stats = &dev->cmd.stats[opcode];
-	spin_lock_irq(&stats->lock);
+	stats = xa_load(&dev->cmd.stats, opcode);
+	if (!stats)
+		return;
+	spin_lock_irqsave(&stats->lock, flags);
 	stats->failed++;
 	if (err < 0)
 		stats->last_failed_errno = -err;
@@ -1963,7 +2003,7 @@ static void cmd_status_log(struct mlx5_core_dev *dev, u16 opcode, u8 status,
 		stats->last_failed_mbox_status = status;
 		stats->last_failed_syndrome = syndrome;
 	}
-	spin_unlock_irq(&stats->lock);
+	spin_unlock_irqrestore(&stats->lock, flags);
 }
 
 /* preserve -EREMOTEIO for outbox.status != OK, otherwise return err as is */
@@ -2088,10 +2128,23 @@ static void mlx5_cmd_exec_cb_handler(int status, void *_work)
 {
 	struct mlx5_async_work *work = _work;
 	struct mlx5_async_ctx *ctx;
+	struct mlx5_core_dev *dev;
+	bool throttle_locked;
+	bool unpriv_locked;
 
 	ctx = work->ctx;
-	status = cmd_status_err(ctx->dev, status, work->opcode, work->op_mod, work->out);
+	dev = ctx->dev;
+	throttle_locked = work->throttle_locked;
+	unpriv_locked = work->unpriv_locked;
+	status = cmd_status_err(dev, status, work->opcode, work->op_mod, work->out);
 	work->user_callback(status, work);
+	/* Can't access "work" from this point on. It could have been freed in
+	 * the callback.
+	 */
+	if (throttle_locked)
+		up(&dev->cmd.vars.throttle_sem);
+	if (unpriv_locked)
+		up(&dev->cmd.vars.unprivileged_sem);
 	if (atomic_dec_and_test(&ctx->num_inflight))
 		complete(&ctx->inflight_done);
 }
@@ -2100,6 +2153,8 @@ int mlx5_cmd_exec_cb(struct mlx5_async_ctx *ctx, void *in, int in_size,
 		     void *out, int out_size, mlx5_async_cbk_t callback,
 		     struct mlx5_async_work *work)
 {
+	struct mlx5_core_dev *dev = ctx->dev;
+	u16 uid;
 	int ret;
 
 	work->ctx = ctx;
@@ -2107,16 +2162,116 @@ int mlx5_cmd_exec_cb(struct mlx5_async_ctx *ctx, void *in, int in_size,
 	work->opcode = in_to_opcode(in);
 	work->op_mod = MLX5_GET(mbox_in, in, op_mod);
 	work->out = out;
+	work->throttle_locked = false;
+	work->unpriv_locked = false;
+	uid = in_to_uid(in);
+
 	if (WARN_ON(!atomic_inc_not_zero(&ctx->num_inflight)))
 		return -EIO;
-	ret = cmd_exec(ctx->dev, in, in_size, out, out_size,
+
+	if (uid && mlx5_has_privileged_uid(dev)) {
+		if (!mlx5_cmd_is_privileged_uid(dev, uid)) {
+			if (down_trylock(&dev->cmd.vars.unprivileged_sem)) {
+				ret = -EBUSY;
+				goto dec_num_inflight;
+			}
+			work->unpriv_locked = true;
+		}
+	} else if (mlx5_cmd_is_throttle_opcode(in_to_opcode(in))) {
+		if (down_trylock(&dev->cmd.vars.throttle_sem)) {
+			ret = -EBUSY;
+			goto dec_num_inflight;
+		}
+		work->throttle_locked = true;
+	}
+
+	ret = cmd_exec(dev, in, in_size, out, out_size,
 		       mlx5_cmd_exec_cb_handler, work, false);
-	if (ret && atomic_dec_and_test(&ctx->num_inflight))
+	if (ret)
+		goto sem_up;
+
+	return 0;
+
+sem_up:
+	if (work->throttle_locked)
+		up(&dev->cmd.vars.throttle_sem);
+	if (work->unpriv_locked)
+		up(&dev->cmd.vars.unprivileged_sem);
+dec_num_inflight:
+	if (atomic_dec_and_test(&ctx->num_inflight))
 		complete(&ctx->inflight_done);
 
 	return ret;
 }
 EXPORT_SYMBOL(mlx5_cmd_exec_cb);
+
+int mlx5_cmd_allow_other_vhca_access(struct mlx5_core_dev *dev,
+				     struct mlx5_cmd_allow_other_vhca_access_attr *attr)
+{
+	u32 out[MLX5_ST_SZ_DW(allow_other_vhca_access_out)] = {};
+	u32 in[MLX5_ST_SZ_DW(allow_other_vhca_access_in)] = {};
+	void *key;
+
+	MLX5_SET(allow_other_vhca_access_in,
+		 in, opcode, MLX5_CMD_OP_ALLOW_OTHER_VHCA_ACCESS);
+	MLX5_SET(allow_other_vhca_access_in,
+		 in, object_type_to_be_accessed, attr->obj_type);
+	MLX5_SET(allow_other_vhca_access_in,
+		 in, object_id_to_be_accessed, attr->obj_id);
+
+	key = MLX5_ADDR_OF(allow_other_vhca_access_in, in, access_key);
+	memcpy(key, attr->access_key, sizeof(attr->access_key));
+
+	return mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
+}
+
+int mlx5_cmd_alias_obj_create(struct mlx5_core_dev *dev,
+			      struct mlx5_cmd_alias_obj_create_attr *alias_attr,
+			      u32 *obj_id)
+{
+	u32 out[MLX5_ST_SZ_DW(general_obj_out_cmd_hdr)] = {};
+	u32 in[MLX5_ST_SZ_DW(create_alias_obj_in)] = {};
+	void *param;
+	void *attr;
+	void *key;
+	int ret;
+
+	attr = MLX5_ADDR_OF(create_alias_obj_in, in, hdr);
+	MLX5_SET(general_obj_in_cmd_hdr,
+		 attr, opcode, MLX5_CMD_OP_CREATE_GENERAL_OBJECT);
+	MLX5_SET(general_obj_in_cmd_hdr,
+		 attr, obj_type, alias_attr->obj_type);
+	param = MLX5_ADDR_OF(general_obj_in_cmd_hdr, in, op_param);
+	MLX5_SET(general_obj_create_param, param, alias_object, 1);
+
+	attr = MLX5_ADDR_OF(create_alias_obj_in, in, alias_ctx);
+	MLX5_SET(alias_context, attr, vhca_id_to_be_accessed, alias_attr->vhca_id);
+	MLX5_SET(alias_context, attr, object_id_to_be_accessed, alias_attr->obj_id);
+
+	key = MLX5_ADDR_OF(alias_context, attr, access_key);
+	memcpy(key, alias_attr->access_key, sizeof(alias_attr->access_key));
+
+	ret = mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
+	if (ret)
+		return ret;
+
+	*obj_id = MLX5_GET(general_obj_out_cmd_hdr, out, obj_id);
+
+	return 0;
+}
+
+int mlx5_cmd_alias_obj_destroy(struct mlx5_core_dev *dev, u32 obj_id,
+			       u16 obj_type)
+{
+	u32 out[MLX5_ST_SZ_DW(general_obj_out_cmd_hdr)] = {};
+	u32 in[MLX5_ST_SZ_DW(general_obj_in_cmd_hdr)] = {};
+
+	MLX5_SET(general_obj_in_cmd_hdr, in, opcode, MLX5_CMD_OP_DESTROY_GENERAL_OBJECT);
+	MLX5_SET(general_obj_in_cmd_hdr, in, obj_type, obj_type);
+	MLX5_SET(general_obj_in_cmd_hdr, in, obj_id, obj_id);
+
+	return mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
+}
 
 static void destroy_msg_cache(struct mlx5_core_dev *dev)
 {
@@ -2125,7 +2280,7 @@ static void destroy_msg_cache(struct mlx5_core_dev *dev)
 	struct mlx5_cmd_msg *n;
 	int i;
 
-	for (i = 0; i < MLX5_NUM_COMMAND_CACHES; i++) {
+	for (i = 0; i < dev->profile.num_cmd_caches; i++) {
 		ch = &dev->cmd.cache[i];
 		list_for_each_entry_safe(msg, n, &ch->head, list) {
 			list_del(&msg->list);
@@ -2155,7 +2310,7 @@ static void create_msg_cache(struct mlx5_core_dev *dev)
 	int k;
 
 	/* Initialize and fill the caches with initial entries */
-	for (k = 0; k < MLX5_NUM_COMMAND_CACHES; k++) {
+	for (k = 0; k < dev->profile.num_cmd_caches; k++) {
 		ch = &cmd->cache[k];
 		spin_lock_init(&ch->lock);
 		INIT_LIST_HEAD(&ch->head);
@@ -2214,55 +2369,23 @@ static u16 cmdif_rev(struct mlx5_core_dev *dev)
 
 int mlx5_cmd_init(struct mlx5_core_dev *dev)
 {
-	int size = sizeof(struct mlx5_cmd_prot_block);
-	int align = roundup_pow_of_two(size);
 	struct mlx5_cmd *cmd = &dev->cmd;
-	u32 cmd_l;
-	int err;
-	int i;
 
-	cmd->pool = dma_pool_create("mlx5_cmd", mlx5_core_dma_dev(dev), size, align, 0);
-	if (!cmd->pool)
-		return -ENOMEM;
-
-	err = alloc_cmd_page(dev, cmd);
-	if (err)
-		goto err_free_pool;
-
-	cmd_l = (u32)(cmd->dma);
-	if (cmd_l & 0xfff) {
-		mlx5_core_err(dev, "invalid command queue address\n");
-		err = -ENOMEM;
-		goto err_cmd_page;
-	}
 	cmd->checksum_disabled = 1;
 
 	spin_lock_init(&cmd->alloc_lock);
 	spin_lock_init(&cmd->token_lock);
-	for (i = 0; i < MLX5_CMD_OP_MAX; i++)
-		spin_lock_init(&cmd->stats[i].lock);
-
-	create_msg_cache(dev);
 
 	set_wqname(dev);
 	cmd->wq = create_singlethread_workqueue(cmd->wq_name);
 	if (!cmd->wq) {
 		mlx5_core_err(dev, "failed to create command workqueue\n");
-		err = -ENOMEM;
-		goto err_cache;
+		return -ENOMEM;
 	}
 
 	mlx5_cmdif_debugfs_init(dev);
 
 	return 0;
-
-err_cache:
-	destroy_msg_cache(dev);
-err_cmd_page:
-	free_cmd_page(dev, cmd);
-err_free_pool:
-	dma_pool_destroy(cmd->pool);
-	return err;
 }
 
 void mlx5_cmd_cleanup(struct mlx5_core_dev *dev)
@@ -2271,15 +2394,15 @@ void mlx5_cmd_cleanup(struct mlx5_core_dev *dev)
 
 	mlx5_cmdif_debugfs_cleanup(dev);
 	destroy_workqueue(cmd->wq);
-	destroy_msg_cache(dev);
-	free_cmd_page(dev, cmd);
-	dma_pool_destroy(cmd->pool);
 }
 
 int mlx5_cmd_enable(struct mlx5_core_dev *dev)
 {
+	int size = sizeof(struct mlx5_cmd_prot_block);
+	int align = roundup_pow_of_two(size);
 	struct mlx5_cmd *cmd = &dev->cmd;
 	u32 cmd_h, cmd_l;
+	int err;
 
 	memset(&cmd->vars, 0, sizeof(cmd->vars));
 	cmd->vars.cmdif_rev = cmdif_rev(dev);
@@ -2311,11 +2434,28 @@ int mlx5_cmd_enable(struct mlx5_core_dev *dev)
 	sema_init(&cmd->vars.sem, cmd->vars.max_reg_cmds);
 	sema_init(&cmd->vars.pages_sem, 1);
 	sema_init(&cmd->vars.throttle_sem, DIV_ROUND_UP(cmd->vars.max_reg_cmds, 2));
+	sema_init(&cmd->vars.unprivileged_sem,
+		  DIV_ROUND_UP(cmd->vars.max_reg_cmds, 2));
+
+	xa_init(&cmd->vars.privileged_uids);
+
+	cmd->pool = dma_pool_create("mlx5_cmd", mlx5_core_dma_dev(dev), size, align, 0);
+	if (!cmd->pool) {
+		err = -ENOMEM;
+		goto err_destroy_xa;
+	}
+
+	err = alloc_cmd_page(dev, cmd);
+	if (err)
+		goto err_free_pool;
 
 	cmd_h = (u32)((u64)(cmd->dma) >> 32);
 	cmd_l = (u32)(cmd->dma);
-	if (WARN_ON(cmd_l & 0xfff))
-		return -EINVAL;
+	if (cmd_l & 0xfff) {
+		mlx5_core_err(dev, "invalid command queue address\n");
+		err = -ENOMEM;
+		goto err_cmd_page;
+	}
 
 	iowrite32be(cmd_h, &dev->iseg->cmdq_addr_h);
 	iowrite32be(cmd_l, &dev->iseg->cmdq_addr_l_sz);
@@ -2328,17 +2468,30 @@ int mlx5_cmd_enable(struct mlx5_core_dev *dev)
 	cmd->mode = CMD_MODE_POLLING;
 	cmd->allowed_opcode = CMD_ALLOWED_OPCODE_ALL;
 
+	create_msg_cache(dev);
 	create_debugfs_files(dev);
 
 	return 0;
+
+err_cmd_page:
+	free_cmd_page(dev, cmd);
+err_free_pool:
+	dma_pool_destroy(cmd->pool);
+err_destroy_xa:
+	xa_destroy(&dev->cmd.vars.privileged_uids);
+	return err;
 }
 
 void mlx5_cmd_disable(struct mlx5_core_dev *dev)
 {
 	struct mlx5_cmd *cmd = &dev->cmd;
 
-	clean_debug_files(dev);
 	flush_workqueue(cmd->wq);
+	clean_debug_files(dev);
+	destroy_msg_cache(dev);
+	free_cmd_page(dev, cmd);
+	dma_pool_destroy(cmd->pool);
+	xa_destroy(&dev->cmd.vars.privileged_uids);
 }
 
 void mlx5_cmd_set_state(struct mlx5_core_dev *dev,
@@ -2346,3 +2499,18 @@ void mlx5_cmd_set_state(struct mlx5_core_dev *dev,
 {
 	dev->cmd.state = cmdif_state;
 }
+
+int mlx5_cmd_add_privileged_uid(struct mlx5_core_dev *dev, u16 uid)
+{
+	return xa_insert(&dev->cmd.vars.privileged_uids, uid,
+			 xa_mk_value(uid), GFP_KERNEL);
+}
+EXPORT_SYMBOL(mlx5_cmd_add_privileged_uid);
+
+void mlx5_cmd_remove_privileged_uid(struct mlx5_core_dev *dev, u16 uid)
+{
+	void *data = xa_erase(&dev->cmd.vars.privileged_uids, uid);
+
+	WARN(!data, "Privileged UID %u does not exist\n", uid);
+}
+EXPORT_SYMBOL(mlx5_cmd_remove_privileged_uid);

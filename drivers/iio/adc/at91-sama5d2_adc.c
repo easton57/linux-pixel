@@ -9,6 +9,7 @@
  */
 
 #include <linux/bitops.h>
+#include <linux/cleanup.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
@@ -585,15 +586,6 @@ struct at91_adc_temp {
 	u16				saved_oversampling;
 };
 
-/*
- * Buffer size requirements:
- * No channels * bytes_per_channel(2) + timestamp bytes (8)
- * Divided by 2 because we need half words.
- * We assume 32 channels for now, has to be increased if needed.
- * Nobody minds a buffer being too big.
- */
-#define AT91_BUFFER_MAX_HWORDS ((32 * 2 + 8) / 2)
-
 struct at91_adc_state {
 	void __iomem			*base;
 	int				irq;
@@ -615,8 +607,8 @@ struct at91_adc_state {
 	struct at91_adc_temp		temp_st;
 	struct iio_dev			*indio_dev;
 	struct device			*dev;
-	/* Ensure naturally aligned timestamp */
-	u16				buffer[AT91_BUFFER_MAX_HWORDS] __aligned(8);
+	/* We assume 32 channels for now, has to be increased if needed. */
+	IIO_DECLARE_BUFFER_WITH_TS(u16, buffer, 32);
 	/*
 	 * lock to prevent concurrent 'single conversion' requests through
 	 * sysfs.
@@ -1206,7 +1198,7 @@ static void at91_dma_buffer_done(void *data)
 {
 	struct iio_dev *indio_dev = data;
 
-	iio_trigger_poll_chained(indio_dev->trig);
+	iio_trigger_poll_nested(indio_dev->trig);
 }
 
 static int at91_adc_dma_start(struct iio_dev *indio_dev)
@@ -1826,19 +1818,10 @@ static int at91_adc_read_info_locked(struct iio_dev *indio_dev,
 				     struct iio_chan_spec const *chan, int *val)
 {
 	struct at91_adc_state *st = iio_priv(indio_dev);
-	int ret;
 
-	ret = iio_device_claim_direct_mode(indio_dev);
-	if (ret)
-		return ret;
+	guard(mutex)(&st->lock);
 
-	mutex_lock(&st->lock);
-	ret = at91_adc_read_info_raw(indio_dev, chan, val);
-	mutex_unlock(&st->lock);
-
-	iio_device_release_direct_mode(indio_dev);
-
-	return ret;
+	return at91_adc_read_info_raw(indio_dev, chan, val);
 }
 
 static void at91_adc_temp_sensor_configure(struct at91_adc_state *st,
@@ -1883,14 +1866,11 @@ static int at91_adc_read_temp(struct iio_dev *indio_dev,
 	u32 tmp;
 	int ret, vbg, vtemp;
 
-	ret = iio_device_claim_direct_mode(indio_dev);
-	if (ret)
-		return ret;
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
 
 	ret = pm_runtime_resume_and_get(st->dev);
 	if (ret < 0)
-		goto unlock;
+		return ret;
 
 	at91_adc_temp_sensor_configure(st, true);
 
@@ -1912,9 +1892,6 @@ restore_config:
 	at91_adc_temp_sensor_configure(st, false);
 	pm_runtime_mark_last_busy(st->dev);
 	pm_runtime_put_autosuspend(st->dev);
-unlock:
-	mutex_unlock(&st->lock);
-	iio_device_release_direct_mode(indio_dev);
 	if (ret < 0)
 		return ret;
 
@@ -1936,10 +1913,16 @@ static int at91_adc_read_raw(struct iio_dev *indio_dev,
 			     int *val, int *val2, long mask)
 {
 	struct at91_adc_state *st = iio_priv(indio_dev);
+	int ret;
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
-		return at91_adc_read_info_locked(indio_dev, chan, val);
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
+
+		ret = at91_adc_read_info_locked(indio_dev, chan, val);
+		iio_device_release_direct(indio_dev);
+		return ret;
 
 	case IIO_CHAN_INFO_SCALE:
 		*val = st->vref_uv / 1000;
@@ -1951,7 +1934,13 @@ static int at91_adc_read_raw(struct iio_dev *indio_dev,
 	case IIO_CHAN_INFO_PROCESSED:
 		if (chan->type != IIO_TEMP)
 			return -EINVAL;
-		return at91_adc_read_temp(indio_dev, chan, val);
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
+
+		ret = at91_adc_read_temp(indio_dev, chan, val);
+		iio_device_release_direct(indio_dev);
+
+		return ret;
 
 	case IIO_CHAN_INFO_SAMP_FREQ:
 		*val = at91_adc_get_sample_freq(st);
@@ -1979,28 +1968,26 @@ static int at91_adc_write_raw(struct iio_dev *indio_dev,
 		if (val == st->oversampling_ratio)
 			return 0;
 
-		ret = iio_device_claim_direct_mode(indio_dev);
-		if (ret)
-			return ret;
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
 		mutex_lock(&st->lock);
 		/* update ratio */
 		ret = at91_adc_config_emr(st, val, 0);
 		mutex_unlock(&st->lock);
-		iio_device_release_direct_mode(indio_dev);
+		iio_device_release_direct(indio_dev);
 		return ret;
 	case IIO_CHAN_INFO_SAMP_FREQ:
 		if (val < st->soc_info.min_sample_rate ||
 		    val > st->soc_info.max_sample_rate)
 			return -EINVAL;
 
-		ret = iio_device_claim_direct_mode(indio_dev);
-		if (ret)
-			return ret;
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
 		mutex_lock(&st->lock);
 		at91_adc_setup_samp_freq(indio_dev, val,
 					 st->soc_info.startup_time, 0);
 		mutex_unlock(&st->lock);
-		iio_device_release_direct_mode(indio_dev);
+		iio_device_release_direct(indio_dev);
 		return 0;
 	default:
 		return -EINVAL;
@@ -2193,7 +2180,7 @@ static ssize_t at91_adc_get_fifo_state(struct device *dev,
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct at91_adc_state *st = iio_priv(indio_dev);
 
-	return scnprintf(buf, PAGE_SIZE, "%d\n", !!st->dma_st.dma_chan);
+	return sysfs_emit(buf, "%d\n", !!st->dma_st.dma_chan);
 }
 
 static ssize_t at91_adc_get_watermark(struct device *dev,
@@ -2202,35 +2189,22 @@ static ssize_t at91_adc_get_watermark(struct device *dev,
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct at91_adc_state *st = iio_priv(indio_dev);
 
-	return scnprintf(buf, PAGE_SIZE, "%d\n", st->dma_st.watermark);
-}
-
-static ssize_t hwfifo_watermark_min_show(struct device *dev,
-					 struct device_attribute *attr,
-					 char *buf)
-{
-	return sysfs_emit(buf, "%s\n", "2");
-}
-
-static ssize_t hwfifo_watermark_max_show(struct device *dev,
-					 struct device_attribute *attr,
-					 char *buf)
-{
-	return sysfs_emit(buf, "%s\n", AT91_HWFIFO_MAX_SIZE_STR);
+	return sysfs_emit(buf, "%d\n", st->dma_st.watermark);
 }
 
 static IIO_DEVICE_ATTR(hwfifo_enabled, 0444,
 		       at91_adc_get_fifo_state, NULL, 0);
 static IIO_DEVICE_ATTR(hwfifo_watermark, 0444,
 		       at91_adc_get_watermark, NULL, 0);
-static IIO_DEVICE_ATTR_RO(hwfifo_watermark_min, 0);
-static IIO_DEVICE_ATTR_RO(hwfifo_watermark_max, 0);
 
-static const struct attribute *at91_adc_fifo_attributes[] = {
-	&iio_dev_attr_hwfifo_watermark_min.dev_attr.attr,
-	&iio_dev_attr_hwfifo_watermark_max.dev_attr.attr,
-	&iio_dev_attr_hwfifo_watermark.dev_attr.attr,
-	&iio_dev_attr_hwfifo_enabled.dev_attr.attr,
+IIO_STATIC_CONST_DEVICE_ATTR(hwfifo_watermark_min, "2");
+IIO_STATIC_CONST_DEVICE_ATTR(hwfifo_watermark_max, AT91_HWFIFO_MAX_SIZE_STR);
+
+static const struct iio_dev_attr *at91_adc_fifo_attributes[] = {
+	&iio_dev_attr_hwfifo_watermark_min,
+	&iio_dev_attr_hwfifo_watermark_max,
+	&iio_dev_attr_hwfifo_watermark,
+	&iio_dev_attr_hwfifo_enabled,
 	NULL,
 };
 
@@ -2247,7 +2221,7 @@ static int at91_adc_buffer_and_trigger_init(struct device *dev,
 					    struct iio_dev *indio)
 {
 	struct at91_adc_state *st = iio_priv(indio);
-	const struct attribute **fifo_attrs;
+	const struct iio_dev_attr **fifo_attrs;
 	int ret;
 
 	if (st->selected_trig->hw_trig)
@@ -2425,12 +2399,8 @@ static int at91_adc_probe(struct platform_device *pdev)
 	st->dma_st.phys_addr = res->start;
 
 	st->irq = platform_get_irq(pdev, 0);
-	if (st->irq <= 0) {
-		if (!st->irq)
-			st->irq = -ENXIO;
-
+	if (st->irq < 0)
 		return st->irq;
-	}
 
 	st->per_clk = devm_clk_get(&pdev->dev, "adc_clk");
 	if (IS_ERR(st->per_clk))
@@ -2515,7 +2485,7 @@ reg_disable:
 	return ret;
 }
 
-static int at91_adc_remove(struct platform_device *pdev)
+static void at91_adc_remove(struct platform_device *pdev)
 {
 	struct iio_dev *indio_dev = platform_get_drvdata(pdev);
 	struct at91_adc_state *st = iio_priv(indio_dev);
@@ -2530,8 +2500,6 @@ static int at91_adc_remove(struct platform_device *pdev)
 
 	regulator_disable(st->vref);
 	regulator_disable(st->reg);
-
-	return 0;
 }
 
 static int at91_adc_suspend(struct device *dev)

@@ -85,7 +85,10 @@ static int bond_option_ad_user_port_key_set(struct bonding *bond,
 					    const struct bond_opt_value *newval);
 static int bond_option_missed_max_set(struct bonding *bond,
 				      const struct bond_opt_value *newval);
-
+static int bond_option_coupled_control_set(struct bonding *bond,
+					   const struct bond_opt_value *newval);
+static int bond_option_broadcast_neigh_set(struct bonding *bond,
+					   const struct bond_opt_value *newval);
 
 static const struct bond_opt_value bond_mode_tbl[] = {
 	{ "balance-rr",    BOND_MODE_ROUNDROBIN,   BOND_VALFLAG_DEFAULT},
@@ -231,6 +234,18 @@ static const struct bond_opt_value bond_missed_max_tbl[] = {
 	{ "maxval",	255,	BOND_VALFLAG_MAX},
 	{ "default",	2,	BOND_VALFLAG_DEFAULT},
 	{ NULL,		-1,	0},
+};
+
+static const struct bond_opt_value bond_coupled_control_tbl[] = {
+	{ "on",  1,  BOND_VALFLAG_DEFAULT},
+	{ "off", 0,  0},
+	{ NULL,  -1, 0},
+};
+
+static const struct bond_opt_value bond_broadcast_neigh_tbl[] = {
+	{ "off", 0, BOND_VALFLAG_DEFAULT},
+	{ "on",	 1, 0},
+	{ NULL,  -1, 0}
 };
 
 static const struct bond_option bond_opts[BOND_OPT_LAST] = {
@@ -497,6 +512,23 @@ static const struct bond_option bond_opts[BOND_OPT_LAST] = {
 		.desc = "Delay between each peer notification on failover event, in milliseconds",
 		.values = bond_peer_notif_delay_tbl,
 		.set = bond_option_peer_notif_delay_set
+	},
+	[BOND_OPT_COUPLED_CONTROL] = {
+		.id = BOND_OPT_COUPLED_CONTROL,
+		.name = "coupled_control",
+		.desc = "Opt into using coupled control MUX for LACP states",
+		.unsuppmodes = BOND_MODE_ALL_EX(BIT(BOND_MODE_8023AD)),
+		.flags = BOND_OPTFLAG_IFDOWN,
+		.values = bond_coupled_control_tbl,
+		.set = bond_option_coupled_control_set,
+	},
+	[BOND_OPT_BROADCAST_NEIGH] = {
+		.id = BOND_OPT_BROADCAST_NEIGH,
+		.name = "broadcast_neighbor",
+		.desc = "Broadcast neighbor packets to all active slaves",
+		.unsuppmodes = BOND_MODE_ALL_EX(BIT(BOND_MODE_8023AD)),
+		.values = bond_broadcast_neigh_tbl,
+		.set = bond_option_broadcast_neigh_set,
 	}
 };
 
@@ -849,22 +881,12 @@ static bool bond_set_xfrm_features(struct bonding *bond)
 	return true;
 }
 
-static bool bond_set_tls_features(struct bonding *bond)
-{
-	if (!IS_ENABLED(CONFIG_TLS_DEVICE))
-		return false;
-
-	if (bond_sk_check(bond))
-		bond->dev->wanted_features |= BOND_TLS_FEATURES;
-	else
-		bond->dev->wanted_features &= ~BOND_TLS_FEATURES;
-
-	return true;
-}
-
 static int bond_option_mode_set(struct bonding *bond,
 				const struct bond_opt_value *newval)
 {
+	if (bond->xdp_prog && !bond_xdp_check(bond, newval->value))
+		return -EOPNOTSUPP;
+
 	if (!bond_mode_uses_arp(newval->value)) {
 		if (bond->params.arp_interval) {
 			netdev_dbg(bond->dev, "%s mode is incompatible with arp monitoring, start mii monitoring\n",
@@ -888,15 +910,23 @@ static int bond_option_mode_set(struct bonding *bond,
 	bond->params.arp_validate = BOND_ARP_VALIDATE_NONE;
 	bond->params.mode = newval->value;
 
+	/* When changing mode, the bond device is down, we may reduce
+	 * the bond_bcast_neigh_enabled in bond_close() if broadcast_neighbor
+	 * enabled in 8023ad mode. Therefore, only clear broadcast_neighbor
+	 * to 0.
+	 */
+	bond->params.broadcast_neighbor = 0;
+
 	if (bond->dev->reg_state == NETREG_REGISTERED) {
 		bool update = false;
 
 		update |= bond_set_xfrm_features(bond);
-		update |= bond_set_tls_features(bond);
 
 		if (update)
 			netdev_update_features(bond->dev);
 	}
+
+	bond_xdp_set_features(bond->dev);
 
 	return 0;
 }
@@ -1543,10 +1573,6 @@ static int bond_option_xmit_hash_policy_set(struct bonding *bond,
 		   newval->string, newval->value);
 	bond->params.xmit_policy = newval->value;
 
-	if (bond->dev->reg_state == NETREG_REGISTERED)
-		if (bond_set_tls_features(bond))
-			netdev_update_features(bond->dev);
-
 	return 0;
 }
 
@@ -1634,6 +1660,7 @@ static int bond_option_lacp_active_set(struct bonding *bond,
 	netdev_dbg(bond->dev, "Setting LACP active to %s (%llu)\n",
 		   newval->string, newval->value);
 	bond->params.lacp_active = newval->value;
+	bond_3ad_update_lacp_active(bond);
 
 	return 0;
 }
@@ -1708,7 +1735,7 @@ static int bond_option_queue_id_set(struct bonding *bond,
 		goto err_no_cmd;
 
 	/* Actually set the qids for the slave */
-	update_slave->queue_id = qid;
+	WRITE_ONCE(update_slave->queue_id, qid);
 
 out:
 	return ret;
@@ -1825,5 +1852,34 @@ static int bond_option_ad_user_port_key_set(struct bonding *bond,
 		   newval->value);
 
 	bond->params.ad_user_port_key = newval->value;
+	return 0;
+}
+
+static int bond_option_coupled_control_set(struct bonding *bond,
+					   const struct bond_opt_value *newval)
+{
+	netdev_info(bond->dev, "Setting coupled_control to %s (%llu)\n",
+		    newval->string, newval->value);
+
+	bond->params.coupled_control = newval->value;
+	return 0;
+}
+
+static int bond_option_broadcast_neigh_set(struct bonding *bond,
+					   const struct bond_opt_value *newval)
+{
+	if (bond->params.broadcast_neighbor == newval->value)
+		return 0;
+
+	bond->params.broadcast_neighbor = newval->value;
+	if (bond->dev->flags & IFF_UP) {
+		if (bond->params.broadcast_neighbor)
+			static_branch_inc(&bond_bcast_neigh_enabled);
+		else
+			static_branch_dec(&bond_bcast_neigh_enabled);
+	}
+
+	netdev_dbg(bond->dev, "Setting broadcast_neighbor to %s (%llu)\n",
+		   newval->string, newval->value);
 	return 0;
 }

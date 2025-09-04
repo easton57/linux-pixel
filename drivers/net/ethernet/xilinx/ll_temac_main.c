@@ -35,12 +35,10 @@
 #include <linux/netdevice.h>
 #include <linux/if_ether.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/of_irq.h>
 #include <linux/of_mdio.h>
 #include <linux/of_net.h>
-#include <linux/of_platform.h>
-#include <linux/of_address.h>
+#include <linux/platform_device.h>
 #include <linux/skbuff.h>
 #include <linux/spinlock.h>
 #include <linux/tcp.h>      /* needed for sizeof(tcphdr) */
@@ -1455,12 +1453,11 @@ static int temac_probe(struct platform_device *pdev)
 	 * endianness mode.  Default for OF devices is big-endian.
 	 */
 	little_endian = false;
-	if (temac_np) {
-		if (of_get_property(temac_np, "little-endian", NULL))
-			little_endian = true;
-	} else if (pdata) {
+	if (temac_np)
+		little_endian = of_property_read_bool(temac_np, "little-endian");
+	else if (pdata)
 		little_endian = pdata->reg_little_endian;
-	}
+
 	if (little_endian) {
 		lp->temac_ior = _temac_ior_le;
 		lp->temac_iow = _temac_iow_le;
@@ -1598,7 +1595,7 @@ static int temac_probe(struct platform_device *pdev)
 	if (temac_np) {
 		lp->phy_node = of_parse_phandle(temac_np, "phy-handle", 0);
 		if (lp->phy_node)
-			dev_dbg(lp->dev, "using PHY node %pOF\n", temac_np);
+			dev_dbg(lp->dev, "using PHY node %pOF\n", lp->phy_node);
 	} else if (pdata) {
 		snprintf(lp->phy_name, sizeof(lp->phy_name),
 			 PHY_ID_FMT, lp->mii_bus->id, pdata->phy_addr);
@@ -1629,7 +1626,7 @@ err_sysfs_create:
 	return rc;
 }
 
-static int temac_remove(struct platform_device *pdev)
+static void temac_remove(struct platform_device *pdev)
 {
 	struct net_device *ndev = platform_get_drvdata(pdev);
 	struct temac_local *lp = netdev_priv(ndev);
@@ -1639,7 +1636,6 @@ static int temac_remove(struct platform_device *pdev)
 	if (lp->phy_node)
 		of_node_put(lp->phy_node);
 	temac_mdio_teardown(lp);
-	return 0;
 }
 
 static const struct of_device_id temac_of_match[] = {

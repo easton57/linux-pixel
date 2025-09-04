@@ -824,7 +824,7 @@ fail:
 	return err;
 }
 
-static int rcar_can_remove(struct platform_device *pdev)
+static void rcar_can_remove(struct platform_device *pdev)
 {
 	struct net_device *ndev = platform_get_drvdata(pdev);
 	struct rcar_can_priv *priv = netdev_priv(ndev);
@@ -832,10 +832,9 @@ static int rcar_can_remove(struct platform_device *pdev)
 	unregister_candev(ndev);
 	netif_napi_del(&priv->napi);
 	free_candev(ndev);
-	return 0;
 }
 
-static int __maybe_unused rcar_can_suspend(struct device *dev)
+static int rcar_can_suspend(struct device *dev)
 {
 	struct net_device *ndev = dev_get_drvdata(dev);
 	struct rcar_can_priv *priv = netdev_priv(ndev);
@@ -858,7 +857,7 @@ static int __maybe_unused rcar_can_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused rcar_can_resume(struct device *dev)
+static int rcar_can_resume(struct device *dev)
 {
 	struct net_device *ndev = dev_get_drvdata(dev);
 	struct rcar_can_priv *priv = netdev_priv(ndev);
@@ -887,7 +886,8 @@ static int __maybe_unused rcar_can_resume(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(rcar_can_pm_ops, rcar_can_suspend, rcar_can_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(rcar_can_pm_ops, rcar_can_suspend,
+				rcar_can_resume);
 
 static const struct of_device_id rcar_can_of_table[] __maybe_unused = {
 	{ .compatible = "renesas,can-r8a7778" },
@@ -905,7 +905,7 @@ static struct platform_driver rcar_can_driver = {
 	.driver = {
 		.name = RCAR_CAN_DRV_NAME,
 		.of_match_table = of_match_ptr(rcar_can_of_table),
-		.pm = &rcar_can_pm_ops,
+		.pm = pm_sleep_ptr(&rcar_can_pm_ops),
 	},
 	.probe = rcar_can_probe,
 	.remove = rcar_can_remove,

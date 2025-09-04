@@ -21,7 +21,6 @@
 #include <linux/module.h>
 #include <linux/stddef.h>
 #include <linux/errno.h>
-#include <linux/aer.h>
 
 #include "dfl.h"
 
@@ -39,14 +38,6 @@
 struct cci_drvdata {
 	struct dfl_fpga_cdev *cdev;	/* container device */
 };
-
-static void __iomem *cci_pci_ioremap_bar0(struct pci_dev *pcidev)
-{
-	if (pcim_iomap_regions(pcidev, BIT(0), DRV_NAME))
-		return NULL;
-
-	return pcim_iomap_table(pcidev)[0];
-}
 
 static int cci_pci_alloc_irq(struct pci_dev *pcidev)
 {
@@ -160,19 +151,12 @@ static int *cci_pci_create_irq_table(struct pci_dev *pcidev, unsigned int nvec)
 
 static int find_dfls_by_vsec(struct pci_dev *pcidev, struct dfl_fpga_enum_info *info)
 {
-	u32 bir, offset, vndr_hdr, dfl_cnt, dfl_res;
-	int dfl_res_off, i, bars, voff = 0;
+	u32 bir, offset, dfl_cnt, dfl_res;
+	int dfl_res_off, i, bars, voff;
 	resource_size_t start, len;
 
-	while ((voff = pci_find_next_ext_capability(pcidev, voff, PCI_EXT_CAP_ID_VNDR))) {
-		vndr_hdr = 0;
-		pci_read_config_dword(pcidev, voff + PCI_VNDR_HEADER, &vndr_hdr);
-
-		if (PCI_VNDR_HEADER_ID(vndr_hdr) == PCI_VSEC_ID_INTEL_DFLS &&
-		    pcidev->vendor == PCI_VENDOR_ID_INTEL)
-			break;
-	}
-
+	voff = pci_find_vsec_capability(pcidev, PCI_VENDOR_ID_INTEL,
+					PCI_VSEC_ID_INTEL_DFLS);
 	if (!voff) {
 		dev_dbg(&pcidev->dev, "%s no DFL VSEC found\n", __func__);
 		return -ENODEV;
@@ -243,9 +227,9 @@ static int find_dfls_by_default(struct pci_dev *pcidev,
 	u64 v;
 
 	/* start to find Device Feature List from Bar 0 */
-	base = cci_pci_ioremap_bar0(pcidev);
-	if (!base)
-		return -ENOMEM;
+	base = pcim_iomap_region(pcidev, 0, DRV_NAME);
+	if (IS_ERR(base))
+		return PTR_ERR(base);
 
 	/*
 	 * PF device has FME and Ports/AFUs, and VF device only has one
@@ -304,7 +288,7 @@ static int find_dfls_by_default(struct pci_dev *pcidev,
 	}
 
 	/* release I/O mappings for next step enumeration */
-	pcim_iounmap_regions(pcidev, BIT(0));
+	pcim_iounmap_region(pcidev, 0);
 
 	return ret;
 }
@@ -379,10 +363,6 @@ int cci_pci_probe(struct pci_dev *pcidev, const struct pci_device_id *pcidevid)
 		return ret;
 	}
 
-	ret = pci_enable_pcie_error_reporting(pcidev);
-	if (ret && ret != -EINVAL)
-		dev_info(&pcidev->dev, "PCIE AER unavailable %d.\n", ret);
-
 	pci_set_master(pcidev);
 
 	ret = dma_set_mask_and_coherent(&pcidev->dev, DMA_BIT_MASK(64));
@@ -390,24 +370,22 @@ int cci_pci_probe(struct pci_dev *pcidev, const struct pci_device_id *pcidevid)
 		ret = dma_set_mask_and_coherent(&pcidev->dev, DMA_BIT_MASK(32));
 	if (ret) {
 		dev_err(&pcidev->dev, "No suitable DMA support available.\n");
-		goto disable_error_report_exit;
+		return ret;
 	}
 
 	ret = cci_init_drvdata(pcidev);
 	if (ret) {
 		dev_err(&pcidev->dev, "Fail to init drvdata %d.\n", ret);
-		goto disable_error_report_exit;
+		return ret;
 	}
 
 	ret = cci_enumerate_feature_devs(pcidev);
-	if (!ret)
+	if (ret) {
+		dev_err(&pcidev->dev, "enumeration failure %d.\n", ret);
 		return ret;
+	}
 
-	dev_err(&pcidev->dev, "enumeration failure %d.\n", ret);
-
-disable_error_report_exit:
-	pci_disable_pcie_error_reporting(pcidev);
-	return ret;
+	return 0;
 }
 
 static int cci_pci_sriov_configure(struct pci_dev *pcidev, int num_vfs)
@@ -451,7 +429,6 @@ static void cci_pci_remove(struct pci_dev *pcidev)
 		cci_pci_sriov_configure(pcidev, 0);
 
 	cci_remove_feature_devs(pcidev);
-	pci_disable_pcie_error_reporting(pcidev);
 }
 
 static struct pci_driver cci_pci_driver = {

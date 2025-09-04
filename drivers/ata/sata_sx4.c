@@ -226,13 +226,12 @@ static void pdc_post_internal_cmd(struct ata_queued_cmd *qc);
 static int pdc_check_atapi_dma(struct ata_queued_cmd *qc);
 
 
-static struct scsi_host_template pdc_sata_sht = {
+static const struct scsi_host_template pdc_sata_sht = {
 	ATA_BASE_SHT(DRV_NAME),
 	.sg_tablesize		= LIBATA_MAX_PRD,
 	.dma_boundary		= ATA_DMA_BOUNDARY,
 };
 
-/* TODO: inherit from base port_ops after converting to new EH */
 static struct ata_port_operations pdc_20621_ops = {
 	.inherits		= &ata_sff_port_ops,
 
@@ -242,7 +241,7 @@ static struct ata_port_operations pdc_20621_ops = {
 
 	.freeze			= pdc_freeze,
 	.thaw			= pdc_thaw,
-	.softreset		= pdc_softreset,
+	.reset.softreset	= pdc_softreset,
 	.error_handler		= pdc_error_handler,
 	.lost_interrupt		= ATA_OP_NULL,
 	.post_internal_cmd	= pdc_post_internal_cmd,
@@ -855,7 +854,7 @@ static int pdc_softreset(struct ata_link *link, unsigned int *class,
 
 static void pdc_error_handler(struct ata_port *ap)
 {
-	if (!(ap->pflags & ATA_PFLAG_FROZEN))
+	if (!ata_port_is_frozen(ap))
 		pdc_reset_port(ap);
 
 	ata_sff_error_handler(ap);
@@ -866,7 +865,7 @@ static void pdc_post_internal_cmd(struct ata_queued_cmd *qc)
 	struct ata_port *ap = qc->ap;
 
 	/* make DMA engine forget about the failed command */
-	if (qc->flags & ATA_QCFLAG_FAILED)
+	if (qc->flags & ATA_QCFLAG_EH)
 		pdc_reset_port(ap);
 }
 
@@ -1302,32 +1301,32 @@ static unsigned int pdc20621_dimm_init(struct ata_host *host)
 	}
 
 	if (dimm_test) {
-		u8 test_parttern1[40] =
+		u8 test_pattern1[40] =
 			{0x55,0xAA,'P','r','o','m','i','s','e',' ',
 			'N','o','t',' ','Y','e','t',' ',
 			'D','e','f','i','n','e','d',' ',
 			'1','.','1','0',
 			'9','8','0','3','1','6','1','2',0,0};
-		u8 test_parttern2[40] = {0};
+		u8 test_pattern2[40] = {0};
 
-		pdc20621_put_to_dimm(host, test_parttern2, 0x10040, 40);
-		pdc20621_put_to_dimm(host, test_parttern2, 0x40, 40);
+		pdc20621_put_to_dimm(host, test_pattern2, 0x10040, 40);
+		pdc20621_put_to_dimm(host, test_pattern2, 0x40, 40);
 
-		pdc20621_put_to_dimm(host, test_parttern1, 0x10040, 40);
-		pdc20621_get_from_dimm(host, test_parttern2, 0x40, 40);
-		dev_info(host->dev, "DIMM test pattern 1: %x, %x, %s\n", test_parttern2[0],
-		       test_parttern2[1], &(test_parttern2[2]));
-		pdc20621_get_from_dimm(host, test_parttern2, 0x10040,
+		pdc20621_put_to_dimm(host, test_pattern1, 0x10040, 40);
+		pdc20621_get_from_dimm(host, test_pattern2, 0x40, 40);
+		dev_info(host->dev, "DIMM test pattern 1: %x, %x, %s\n", test_pattern2[0],
+		       test_pattern2[1], &(test_pattern2[2]));
+		pdc20621_get_from_dimm(host, test_pattern2, 0x10040,
 				       40);
 		dev_info(host->dev, "DIMM test pattern 2: %x, %x, %s\n",
-			 test_parttern2[0],
-			 test_parttern2[1], &(test_parttern2[2]));
+			 test_pattern2[0],
+			 test_pattern2[1], &(test_pattern2[2]));
 
-		pdc20621_put_to_dimm(host, test_parttern1, 0x40, 40);
-		pdc20621_get_from_dimm(host, test_parttern2, 0x40, 40);
+		pdc20621_put_to_dimm(host, test_pattern1, 0x40, 40);
+		pdc20621_get_from_dimm(host, test_pattern2, 0x40, 40);
 		dev_info(host->dev, "DIMM test pattern 3: %x, %x, %s\n",
-			 test_parttern2[0],
-			 test_parttern2[1], &(test_parttern2[2]));
+			 test_pattern2[0],
+			 test_pattern2[1], &(test_pattern2[2]));
 	}
 
 	/* ECC initiliazation. */

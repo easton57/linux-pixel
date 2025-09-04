@@ -154,6 +154,7 @@ void br_forward(const struct net_bridge_port *to,
 		backup_port = rcu_dereference(to->backup_port);
 		if (unlikely(!backup_port))
 			goto out;
+		BR_INPUT_SKB_CB(skb)->backup_nhid = READ_ONCE(to->backup_nhid);
 		to = backup_port;
 	}
 
@@ -197,10 +198,14 @@ out:
 
 /* called under rcu_read_lock */
 void br_flood(struct net_bridge *br, struct sk_buff *skb,
-	      enum br_pkt_type pkt_type, bool local_rcv, bool local_orig)
+	      enum br_pkt_type pkt_type, bool local_rcv, bool local_orig,
+	      u16 vid)
 {
+	enum skb_drop_reason reason = SKB_DROP_REASON_NO_TX_TARGET;
 	struct net_bridge_port *prev = NULL;
 	struct net_bridge_port *p;
+
+	br_tc_skb_miss_set(skb, pkt_type != BR_PKT_BROADCAST);
 
 	list_for_each_entry_rcu(p, &br->port_list, list) {
 		/* Do not flood unicast traffic to ports that turn it off, nor
@@ -224,13 +229,17 @@ void br_flood(struct net_bridge *br, struct sk_buff *skb,
 		/* Do not flood to ports that enable proxy ARP */
 		if (p->flags & BR_PROXYARP)
 			continue;
-		if ((p->flags & (BR_PROXYARP_WIFI | BR_NEIGH_SUPPRESS)) &&
-		    BR_INPUT_SKB_CB(skb)->proxyarp_replied)
+		if (BR_INPUT_SKB_CB(skb)->proxyarp_replied &&
+		    ((p->flags & BR_PROXYARP_WIFI) ||
+		     br_is_neigh_suppress_enabled(p, vid)))
 			continue;
 
 		prev = maybe_deliver(prev, p, skb, local_orig);
-		if (IS_ERR(prev))
+		if (IS_ERR(prev)) {
+			reason = PTR_ERR(prev) == -ENOMEM ? SKB_DROP_REASON_NOMEM :
+				 SKB_DROP_REASON_NOT_SPECIFIED;
 			goto out;
+		}
 	}
 
 	if (!prev)
@@ -244,7 +253,7 @@ void br_flood(struct net_bridge *br, struct sk_buff *skb,
 
 out:
 	if (!local_rcv)
-		kfree_skb(skb);
+		kfree_skb_reason(skb, reason);
 }
 
 #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
@@ -284,6 +293,7 @@ void br_multicast_flood(struct net_bridge_mdb_entry *mdst,
 			struct net_bridge_mcast *brmctx,
 			bool local_rcv, bool local_orig)
 {
+	enum skb_drop_reason reason = SKB_DROP_REASON_NO_TX_TARGET;
 	struct net_bridge_port *prev = NULL;
 	struct net_bridge_port_group *p;
 	bool allow_mode_include = true;
@@ -298,6 +308,7 @@ void br_multicast_flood(struct net_bridge_mdb_entry *mdst,
 			allow_mode_include = false;
 	} else {
 		p = NULL;
+		br_tc_skb_miss_set(skb, true);
 	}
 
 	while (p || rp) {
@@ -323,8 +334,11 @@ void br_multicast_flood(struct net_bridge_mdb_entry *mdst,
 		}
 
 		prev = maybe_deliver(prev, port, skb, local_orig);
-		if (IS_ERR(prev))
+		if (IS_ERR(prev)) {
+			reason = PTR_ERR(prev) == -ENOMEM ? SKB_DROP_REASON_NOMEM :
+				 SKB_DROP_REASON_NOT_SPECIFIED;
 			goto out;
+		}
 delivered:
 		if ((unsigned long)lport >= (unsigned long)port)
 			p = rcu_dereference(p->next);
@@ -343,6 +357,6 @@ delivered:
 
 out:
 	if (!local_rcv)
-		kfree_skb(skb);
+		kfree_skb_reason(skb, reason);
 }
 #endif

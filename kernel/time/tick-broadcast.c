@@ -623,9 +623,13 @@ struct cpumask *tick_get_broadcast_oneshot_mask(void)
  * to avoid a deep idle transition as we are about to get the
  * broadcast IPI right away.
  */
-int tick_check_broadcast_expired(void)
+noinstr int tick_check_broadcast_expired(void)
 {
+#ifdef _ASM_GENERIC_BITOPS_INSTRUMENTED_NON_ATOMIC_H
+	return arch_test_bit(smp_processor_id(), cpumask_bits(tick_broadcast_force_mask));
+#else
 	return cpumask_test_cpu(smp_processor_id(), tick_broadcast_force_mask);
+#endif
 }
 
 /*
@@ -1016,6 +1020,8 @@ static inline ktime_t tick_get_next_period(void)
 
 /**
  * tick_broadcast_setup_oneshot - setup the broadcast device
+ * @bc: the broadcast device
+ * @from_periodic: true if called from periodic mode
  */
 static void tick_broadcast_setup_oneshot(struct clock_event_device *bc,
 					 bool from_periodic)

@@ -454,10 +454,10 @@ static int wm8974_set_dai_fmt(struct snd_soc_dai *codec_dai,
 
 	/* set master/slave audio interface */
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		clk |= 0x0001;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
 	default:
 		return -EINVAL;
@@ -707,7 +707,7 @@ static int wm8974_i2c_probe(struct i2c_client *i2c)
 }
 
 static const struct i2c_device_id wm8974_i2c_id[] = {
-	{ "wm8974", 0 },
+	{ "wm8974" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, wm8974_i2c_id);
@@ -723,7 +723,7 @@ static struct i2c_driver wm8974_i2c_driver = {
 		.name = "wm8974",
 		.of_match_table = wm8974_of_match,
 	},
-	.probe_new = wm8974_i2c_probe,
+	.probe = wm8974_i2c_probe,
 	.id_table = wm8974_i2c_id,
 };
 

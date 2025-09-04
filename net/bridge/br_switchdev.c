@@ -74,7 +74,7 @@ bool nbp_switchdev_allowed_egress(const struct net_bridge_port *p,
 }
 
 /* Flags that can be offloaded to hardware */
-#define BR_PORT_FLAGS_HW_OFFLOAD (BR_LEARNING | BR_FLOOD | \
+#define BR_PORT_FLAGS_HW_OFFLOAD (BR_LEARNING | BR_FLOOD | BR_PORT_MAB | \
 				  BR_MCAST_FLOOD | BR_BCAST_FLOOD | BR_PORT_LOCKED | \
 				  BR_HAIRPIN_MODE | BR_ISOLATED | BR_MULTICAST_TO_UNICAST)
 
@@ -107,9 +107,8 @@ int br_switchdev_set_port_flag(struct net_bridge_port *p,
 		return 0;
 
 	if (err) {
-		if (extack && !extack->_msg)
-			NL_SET_ERR_MSG_MOD(extack,
-					   "bridge flag offload is not supported");
+		NL_SET_ERR_MSG_WEAK_MOD(extack,
+					"bridge flag offload is not supported");
 		return -EOPNOTSUPP;
 	}
 
@@ -118,9 +117,8 @@ int br_switchdev_set_port_flag(struct net_bridge_port *p,
 
 	err = switchdev_port_attr_set(p->dev, &attr, extack);
 	if (err) {
-		if (extack && !extack->_msg)
-			NL_SET_ERR_MSG_MOD(extack,
-					   "error setting offload flag on port");
+		NL_SET_ERR_MSG_WEAK_MOD(extack,
+					"error setting offload flag on port");
 		return err;
 	}
 
@@ -139,6 +137,7 @@ static void br_switchdev_fdb_populate(struct net_bridge *br,
 	item->added_by_user = test_bit(BR_FDB_ADDED_BY_USER, &fdb->flags);
 	item->offloaded = test_bit(BR_FDB_OFFLOADED, &fdb->flags);
 	item->is_local = test_bit(BR_FDB_LOCAL, &fdb->flags);
+	item->locked = false;
 	item->info.dev = (!p || item->is_local) ? br->dev : p->dev;
 	item->info.ctx = ctx;
 }
@@ -148,6 +147,9 @@ br_switchdev_fdb_notify(struct net_bridge *br,
 			const struct net_bridge_fdb_entry *fdb, int type)
 {
 	struct switchdev_notifier_fdb_info item;
+
+	if (test_bit(BR_FDB_LOCKED, &fdb->flags))
+		return;
 
 	/* Entries with these flags were created using ndm_state == NUD_REACHABLE,
 	 * ndm_flags == NTF_MASTER( | NTF_STICKY), ext_flags == 0 by something
@@ -505,9 +507,10 @@ static void br_switchdev_mdb_complete(struct net_device *dev, int err, void *pri
 	struct net_bridge_mdb_entry *mp;
 	struct net_bridge_port *port = data->port;
 	struct net_bridge *br = port->br;
+	u8 old_flags;
 
-	if (err)
-		goto err;
+	if (err == -EOPNOTSUPP)
+		goto out_free;
 
 	spin_lock_bh(&br->multicast_lock);
 	mp = br_mdb_ip_get(br, &data->ip);
@@ -517,11 +520,15 @@ static void br_switchdev_mdb_complete(struct net_device *dev, int err, void *pri
 	     pp = &p->next) {
 		if (p->key.port != port)
 			continue;
-		p->flags |= MDB_PG_FLAGS_OFFLOAD;
+
+		old_flags = p->flags;
+		br_multicast_set_pg_offload_flags(p, !err);
+		if (br_mdb_should_notify(br, old_flags ^ p->flags))
+			br_mdb_flag_change_notify(br->dev, mp, p);
 	}
 out:
 	spin_unlock_bh(&br->multicast_lock);
-err:
+out_free:
 	kfree(priv);
 }
 
@@ -746,6 +753,8 @@ br_switchdev_mdb_replay(struct net_device *br_dev, struct net_device *dev,
 		err = br_switchdev_mdb_replay_one(nb, dev,
 						  SWITCHDEV_OBJ_PORT_MDB(obj),
 						  action, ctx, extack);
+		if (err == -EOPNOTSUPP)
+			err = 0;
 		if (err)
 			goto out_free_mdb;
 	}
@@ -778,8 +787,10 @@ static int nbp_switchdev_sync_objs(struct net_bridge_port *p, const void *ctx,
 
 	err = br_switchdev_mdb_replay(br_dev, dev, ctx, true, blocking_nb,
 				      extack);
-	if (err && err != -EOPNOTSUPP)
+	if (err) {
+		/* -EOPNOTSUPP not propagated from MDB replay. */
 		return err;
+	}
 
 	err = br_switchdev_fdb_replay(br_dev, ctx, true, atomic_nb);
 	if (err && err != -EOPNOTSUPP)
@@ -826,7 +837,7 @@ int br_switchdev_port_offload(struct net_bridge_port *p,
 	struct netdev_phys_item_id ppid;
 	int err;
 
-	err = dev_get_port_parent_id(dev, &ppid, false);
+	err = netif_get_port_parent_id(dev, &ppid, false);
 	if (err)
 		return err;
 
@@ -853,4 +864,13 @@ void br_switchdev_port_unoffload(struct net_bridge_port *p, const void *ctx,
 	nbp_switchdev_unsync_objs(p, ctx, atomic_nb, blocking_nb);
 
 	nbp_switchdev_del(p);
+}
+
+int br_switchdev_port_replay(struct net_bridge_port *p,
+			     struct net_device *dev, const void *ctx,
+			     struct notifier_block *atomic_nb,
+			     struct notifier_block *blocking_nb,
+			     struct netlink_ext_ack *extack)
+{
+	return nbp_switchdev_sync_objs(p, ctx, atomic_nb, blocking_nb, extack);
 }

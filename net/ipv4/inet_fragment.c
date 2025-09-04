@@ -133,9 +133,10 @@ static void inet_frags_free_cb(void *ptr, void *arg)
 	struct inet_frag_queue *fq = ptr;
 	int count;
 
-	count = del_timer_sync(&fq->timer) ? 1 : 0;
+	count = timer_delete_sync(&fq->timer) ? 1 : 0;
 
 	spin_lock_bh(&fq->lock);
+	fq->flags |= INET_FRAG_DROP;
 	if (!(fq->flags & INET_FRAG_COMPLETE)) {
 		fq->flags |= INET_FRAG_COMPLETE;
 		count++;
@@ -144,8 +145,7 @@ static void inet_frags_free_cb(void *ptr, void *arg)
 	}
 	spin_unlock_bh(&fq->lock);
 
-	if (refcount_sub_and_test(count, &fq->refcnt))
-		inet_frag_destroy(fq);
+	inet_frag_putn(fq, count);
 }
 
 static LLIST_HEAD(fqdir_free_list);
@@ -174,7 +174,7 @@ static void fqdir_free_fn(struct work_struct *work)
 	}
 }
 
-static DECLARE_WORK(fqdir_free_work, fqdir_free_fn);
+static DECLARE_DELAYED_WORK(fqdir_free_work, fqdir_free_fn);
 
 static void fqdir_work_fn(struct work_struct *work)
 {
@@ -183,7 +183,7 @@ static void fqdir_work_fn(struct work_struct *work)
 	rhashtable_free_and_destroy(&fqdir->rhashtable, inet_frags_free_cb, NULL);
 
 	if (llist_add(&fqdir->free_list, &fqdir_free_list))
-		queue_work(system_wq, &fqdir_free_work);
+		queue_delayed_work(system_wq, &fqdir_free_work, HZ);
 }
 
 int fqdir_init(struct fqdir **fqdirp, struct inet_frags *f, struct net *net)
@@ -225,10 +225,10 @@ void fqdir_exit(struct fqdir *fqdir)
 }
 EXPORT_SYMBOL(fqdir_exit);
 
-void inet_frag_kill(struct inet_frag_queue *fq)
+void inet_frag_kill(struct inet_frag_queue *fq, int *refs)
 {
-	if (del_timer(&fq->timer))
-		refcount_dec(&fq->refcnt);
+	if (timer_delete(&fq->timer))
+		(*refs)++;
 
 	if (!(fq->flags & INET_FRAG_COMPLETE)) {
 		struct fqdir *fqdir = fq->fqdir;
@@ -243,7 +243,7 @@ void inet_frag_kill(struct inet_frag_queue *fq)
 		if (!READ_ONCE(fqdir->dead)) {
 			rhashtable_remove_fast(&fqdir->rhashtable, &fq->node,
 					       fqdir->f->rhash_params);
-			refcount_dec(&fq->refcnt);
+			(*refs)++;
 		} else {
 			fq->flags |= INET_FRAG_HASH_DEAD;
 		}
@@ -263,7 +263,8 @@ static void inet_frag_destroy_rcu(struct rcu_head *head)
 	kmem_cache_free(f->frags_cachep, q);
 }
 
-unsigned int inet_frag_rbtree_purge(struct rb_root *root)
+unsigned int inet_frag_rbtree_purge(struct rb_root *root,
+				    enum skb_drop_reason reason)
 {
 	struct rb_node *p = rb_first(root);
 	unsigned int sum = 0;
@@ -277,7 +278,7 @@ unsigned int inet_frag_rbtree_purge(struct rb_root *root)
 			struct sk_buff *next = FRAG_CB(skb)->next_frag;
 
 			sum += skb->truesize;
-			kfree_skb(skb);
+			kfree_skb_reason(skb, reason);
 			skb = next;
 		}
 	}
@@ -287,17 +288,21 @@ EXPORT_SYMBOL(inet_frag_rbtree_purge);
 
 void inet_frag_destroy(struct inet_frag_queue *q)
 {
-	struct fqdir *fqdir;
 	unsigned int sum, sum_truesize = 0;
+	enum skb_drop_reason reason;
 	struct inet_frags *f;
+	struct fqdir *fqdir;
 
 	WARN_ON(!(q->flags & INET_FRAG_COMPLETE));
-	WARN_ON(del_timer(&q->timer) != 0);
+	reason = (q->flags & INET_FRAG_DROP) ?
+			SKB_DROP_REASON_FRAG_REASM_TIMEOUT :
+			SKB_CONSUMED;
+	WARN_ON(timer_delete(&q->timer) != 0);
 
 	/* Release all fragment data. */
 	fqdir = q->fqdir;
 	f = fqdir->f;
-	sum_truesize = inet_frag_rbtree_purge(&q->rb_fragments);
+	sum_truesize = inet_frag_rbtree_purge(&q->rb_fragments, reason);
 	sum = sum_truesize + f->qsize;
 
 	call_rcu(&q->rcu, inet_frag_destroy_rcu);
@@ -322,7 +327,8 @@ static struct inet_frag_queue *inet_frag_alloc(struct fqdir *fqdir,
 
 	timer_setup(&q->timer, f->frag_expire, 0);
 	spin_lock_init(&q->lock);
-	refcount_set(&q->refcnt, 3);
+	/* One reference for the timer, one for the hash table. */
+	refcount_set(&q->refcnt, 2);
 
 	return q;
 }
@@ -344,15 +350,20 @@ static struct inet_frag_queue *inet_frag_create(struct fqdir *fqdir,
 	*prev = rhashtable_lookup_get_insert_key(&fqdir->rhashtable, &q->key,
 						 &q->node, f->rhash_params);
 	if (*prev) {
+		/* We could not insert in the hash table,
+		 * we need to cancel what inet_frag_alloc()
+		 * anticipated.
+		 */
+		int refs = 1;
+
 		q->flags |= INET_FRAG_COMPLETE;
-		inet_frag_kill(q);
-		inet_frag_destroy(q);
+		inet_frag_kill(q, &refs);
+		inet_frag_putn(q, refs);
 		return NULL;
 	}
 	return q;
 }
 
-/* TODO : call from rcu_read_lock() and no longer use refcount_inc_not_zero() */
 struct inet_frag_queue *inet_frag_find(struct fqdir *fqdir, void *key)
 {
 	/* This pairs with WRITE_ONCE() in fqdir_pre_exit(). */
@@ -362,17 +373,11 @@ struct inet_frag_queue *inet_frag_find(struct fqdir *fqdir, void *key)
 	if (!high_thresh || frag_mem_limit(fqdir) > high_thresh)
 		return NULL;
 
-	rcu_read_lock();
-
 	prev = rhashtable_lookup(&fqdir->rhashtable, key, fqdir->f->rhash_params);
 	if (!prev)
 		fq = inet_frag_create(fqdir, key, &prev);
-	if (!IS_ERR_OR_NULL(prev)) {
+	if (!IS_ERR_OR_NULL(prev))
 		fq = prev;
-		if (!refcount_inc_not_zero(&fq->refcnt))
-			fq = NULL;
-	}
-	rcu_read_unlock();
 	return fq;
 }
 EXPORT_SYMBOL(inet_frag_find);
@@ -613,7 +618,7 @@ void inet_frag_reasm_finish(struct inet_frag_queue *q, struct sk_buff *head,
 	skb_mark_not_on_list(head);
 	head->prev = NULL;
 	head->tstamp = q->stamp;
-	head->mono_delivery_time = q->mono_delivery_time;
+	head->tstamp_type = q->tstamp_type;
 
 	if (sk)
 		refcount_add(sum_truesize - head_truesize, &sk->sk_wmem_alloc);

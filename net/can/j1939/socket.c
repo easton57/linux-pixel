@@ -189,7 +189,7 @@ activate_next:
 		int time_ms = 0;
 
 		if (err)
-			time_ms = 10 + prandom_u32_max(16);
+			time_ms = 10 + get_random_u32_below(16);
 
 		j1939_tp_schedule_txtimer(first, time_ms);
 	}
@@ -311,6 +311,7 @@ static void j1939_sk_recv_one(struct j1939_sock *jsk, struct sk_buff *oskb)
 {
 	const struct j1939_sk_buff_cb *oskcb = j1939_skb_to_cb(oskb);
 	struct j1939_sk_buff_cb *skcb;
+	enum skb_drop_reason reason;
 	struct sk_buff *skb;
 
 	if (oskb->sk == &jsk->sk)
@@ -331,8 +332,8 @@ static void j1939_sk_recv_one(struct j1939_sock *jsk, struct sk_buff *oskb)
 	if (skb->sk)
 		skcb->msg_flags |= MSG_DONTROUTE;
 
-	if (sock_queue_rcv_skb(&jsk->sk, skb) < 0)
-		kfree_skb(skb);
+	if (sock_queue_rcv_skb_reason(&jsk->sk, skb, &reason) < 0)
+		sk_skb_reason_drop(&jsk->sk, skb, reason);
 }
 
 bool j1939_sk_recv_match(struct j1939_priv *priv, struct j1939_sk_buff_cb *skcb)
@@ -655,6 +656,7 @@ static int j1939_sk_release(struct socket *sock)
 	sock->sk = NULL;
 
 	release_sock(sk);
+	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, -1);
 	sock_put(sk);
 
 	return 0;
@@ -898,7 +900,7 @@ static struct sk_buff *j1939_sk_alloc_skb(struct net_device *ndev,
 	skcb = j1939_skb_to_cb(skb);
 	memset(skcb, 0, sizeof(*skcb));
 	skcb->addr = jsk->addr;
-	skcb->priority = j1939_prio(sk->sk_priority);
+	skcb->priority = j1939_prio(READ_ONCE(sk->sk_priority));
 
 	if (msg->msg_name) {
 		struct sockaddr_can *addr = msg->msg_name;
@@ -1322,7 +1324,6 @@ static const struct proto_ops j1939_ops = {
 	.sendmsg = j1939_sk_sendmsg,
 	.recvmsg = j1939_sk_recvmsg,
 	.mmap = sock_no_mmap,
-	.sendpage = sock_no_sendpage,
 };
 
 static struct proto j1939_proto __read_mostly = {

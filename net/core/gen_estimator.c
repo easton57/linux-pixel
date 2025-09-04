@@ -75,7 +75,7 @@ static void est_fetch_counters(struct net_rate_estimator *e,
 
 static void est_timer(struct timer_list *t)
 {
-	struct net_rate_estimator *est = from_timer(est, t, timer);
+	struct net_rate_estimator *est = timer_container_of(est, t, timer);
 	struct gnet_stats_basic_sync b;
 	u64 b_bytes, b_packets;
 	u64 rate, brate;
@@ -177,7 +177,7 @@ int gen_new_estimator(struct gnet_stats_basic_sync *bstats,
 		spin_lock_bh(lock);
 	old = rcu_dereference_protected(*rate_est, 1);
 	if (old) {
-		del_timer_sync(&old->timer);
+		timer_delete_sync(&old->timer);
 		est->avbps = old->avbps;
 		est->avpps = old->avpps;
 	}
@@ -208,7 +208,7 @@ void gen_kill_estimator(struct net_rate_estimator __rcu **rate_est)
 
 	est = unrcu_pointer(xchg(rate_est, NULL));
 	if (est) {
-		del_timer_sync(&est->timer);
+		timer_shutdown_sync(&est->timer);
 		kfree_rcu(est, rcu);
 	}
 }

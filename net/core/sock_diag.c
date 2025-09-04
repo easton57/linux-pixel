@@ -26,14 +26,17 @@ DEFINE_COOKIE(sock_cookie);
 
 u64 __sock_gen_cookie(struct sock *sk)
 {
-	while (1) {
-		u64 res = atomic64_read(&sk->sk_cookie);
+	u64 res = atomic64_read(&sk->sk_cookie);
 
-		if (res)
-			return res;
-		res = gen_cookie_next(&sock_cookie);
-		atomic64_cmpxchg(&sk->sk_cookie, 0, res);
+	if (!res) {
+		u64 new = gen_cookie_next(&sock_cookie);
+
+		atomic64_cmpxchg(&sk->sk_cookie, res, new);
+
+		/* Another thread might have changed sk_cookie before us. */
+		res = atomic64_read(&sk->sk_cookie);
 	}
+	return res;
 }
 
 int sock_diag_check_cookie(struct sock *sk, const __u32 *cookie)
@@ -261,8 +264,6 @@ static int sock_diag_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
 
 	switch (nlh->nlmsg_type) {
 	case TCPDIAG_GETSOCK:
-	case DCCPDIAG_GETSOCK:
-
 		if (!rcu_access_pointer(inet_rcv_compat))
 			sock_load_diag_module(AF_INET, 0);
 
@@ -287,13 +288,9 @@ static int sock_diag_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
 	}
 }
 
-static DEFINE_MUTEX(sock_diag_mutex);
-
 static void sock_diag_rcv(struct sk_buff *skb)
 {
-	mutex_lock(&sock_diag_mutex);
 	netlink_rcv_skb(skb, &sock_diag_rcv_msg);
-	mutex_unlock(&sock_diag_mutex);
 }
 
 static int sock_diag_bind(struct net *net, int group)

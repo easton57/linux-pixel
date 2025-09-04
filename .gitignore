@@ -14,3 +14,9 @@
 .config.old
 
 from_google/
+
+*.dtb
+.*
+dtbs-list
+
+generated/*

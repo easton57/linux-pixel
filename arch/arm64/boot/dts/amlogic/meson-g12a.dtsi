@@ -50,6 +50,8 @@
 
 		l2: l2-cache0 {
 			compatible = "cache";
+			cache-level = <2>;
+			cache-unified;
 		};
 	};
 
@@ -60,6 +62,7 @@
 		opp-1000000000 {
 			opp-hz = /bits/ 64 <1000000000>;
 			opp-microvolt = <731000>;
+			clock-latency-ns = <50000>;
 		};
 
 		opp-1200000000 {
@@ -112,4 +115,8 @@
 					<&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
 		};
 	};
+};
+
+&pmu {
+	compatible = "amlogic,g12a-ddr-pmu";
 };
